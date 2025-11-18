@@ -11,7 +11,9 @@ from .builder_ht_over_05 import build_ht_over_05_legs
 from .builder_home_win import build_home_win_legs
 from .builder_away_win import build_away_win_legs
 from .builder_draw import build_draw_legs
-from .builder_btts import build_btts_legs
+from .builder_btts_yes import build_btts_yes_legs
+from .builder_btts_no import build_btts_no_legs
+from .builder_btts import build_btts_legs  # legacy alias (BTTS -> YES)
 from .builder_1X import build_1x_legs
 from .builder_X2 import build_x2_legs
 
@@ -30,6 +32,9 @@ BUILDERS: Dict[str, BuilderFn] = {
     "AWAY": build_away_win_legs,
     "DRAW": build_draw_legs,
     # BTTS
+    "BTTS_YES": build_btts_yes_legs,
+    "BTTS_NO": build_btts_no_legs,
+    # Legacy alias: zadržavamo "BTTS" kao YES da ne lomimo postojeće setove
     "BTTS": build_btts_legs,
     # Half-time goals
     "HT_O05": build_ht_over_05_legs,
@@ -46,7 +51,9 @@ MARKET_FAMILY: Dict[str, str] = {
     "HOME": "RESULT",
     "AWAY": "RESULT",
     "DRAW": "RESULT",
-    "BTTS": "BTTS",
+    "BTTS_YES": "BTTS",
+    "BTTS_NO": "BTTS",
+    "BTTS": "BTTS",           # legacy alias
     "HT_O05": "HT_GOALS",
     "DC_1X": "DOUBLE_CHANCE",
     "DC_X2": "DOUBLE_CHANCE",
