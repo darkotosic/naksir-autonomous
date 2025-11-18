@@ -1,0 +1,263 @@
+import os
+import time
+import logging
+from typing import Any, Dict, Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------
+# Konfiguracija
+# ---------------------------------------------------------------------
+
+API_KEY = os.getenv("API_FOOTBALL_KEY", "")
+API_BASE = os.getenv("API_FOOTBALL_BASE_URL", "https://v3.football.api-sports.io")
+
+# Minimalna pauza između poziva da ne čekićamo API (u sekundama)
+MIN_REQUEST_INTERVAL = float(os.getenv("API_FOOTBALL_MIN_INTERVAL", "0.3"))
+
+# Retry konfiguracija
+MAX_RETRIES = int(os.getenv("API_FOOTBALL_MAX_RETRIES", "3"))
+RETRY_BACKOFF_BASE = float(os.getenv("API_FOOTBALL_BACKOFF_BASE", "0.8"))
+
+# Interno stanje za jednostavan QPS limiter
+_last_request_ts: float = 0.0
+
+
+# ---------------------------------------------------------------------
+# Interni helperi
+# ---------------------------------------------------------------------
+
+def _ensure_api_key() -> None:
+    if not API_KEY:
+        raise RuntimeError("API_FOOTBALL_KEY environment variable not set")
+
+
+def _respect_qps_limit() -> None:
+    """
+    Vrlo jednostavan limiter:
+    - obezbedi da je bar MIN_REQUEST_INTERVAL prošlo između 2 poziva.
+    Za enterprise kasnije možeš staviti ozbiljniji token bucket.
+    """
+    global _last_request_ts
+    now = time.time()
+    delta = now - _last_request_ts
+    if delta < MIN_REQUEST_INTERVAL:
+        sleep_for = MIN_REQUEST_INTERVAL - delta
+        time.sleep(sleep_for)
+    _last_request_ts = time.time()
+
+
+def _request(
+    path: str,
+    params: Optional[Dict[str, Any]] = None,
+    *,
+    method: str = "GET",
+    timeout: int = 20,
+    max_retries: int = MAX_RETRIES,
+) -> Dict[str, Any]:
+    """
+    Centralni HTTP wrapper za sve pozive API-FOOTBALL-a.
+
+    - Dodaje API ključ u header.
+    - Radi jednostavan QPS limit.
+    - Ima retry sa eksponencijalnim backoff-om.
+    - Ako posle retry-a i dalje nije OK, baca RuntimeError sa kontekstom.
+    """
+    _ensure_api_key()
+    if params is None:
+        params = {}
+
+    url = f"{API_BASE.rstrip('/')}/{path.lstrip('/')}"
+    headers = {
+        "x-apisports-key": API_KEY,
+        "Accept": "application/json",
+    }
+
+    attempt = 0
+    last_exc: Optional[Exception] = None
+    while attempt < max_retries:
+        attempt += 1
+        try:
+            _respect_qps_limit()
+            resp = requests.request(method, url, headers=headers, params=params, timeout=timeout)
+
+            # Log basic info
+            logger.debug(
+                "API-Football request: %s %s params=%s status=%s",
+                method,
+                url,
+                params,
+                resp.status_code,
+            )
+
+            # Rate-limit situacije i server greške
+            if resp.status_code in (429, 500, 502, 503, 504):
+                logger.warning(
+                    "API-Football transient error (status=%s), attempt=%s/%s",
+                    resp.status_code,
+                    attempt,
+                    max_retries,
+                )
+                # čitamo malo body zbog debug-a
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"raw": resp.text[:300]}
+                last_exc = RuntimeError(f"Transient API error: {resp.status_code}, body={data}")
+            elif resp.status_code != 200:
+                # Ne retry-amo ostale 4xx osim 429
+                try:
+                    data = resp.json()
+                except Exception:
+                    data = {"raw": resp.text[:300]}
+                raise RuntimeError(
+                    f"API error: status={resp.status_code}, url={url}, params={params}, body={data}"
+                )
+            else:
+                # 200 OK
+                try:
+                    return resp.json()
+                except ValueError as e:
+                    # JSON decode problem – retry ima smisla
+                    logger.warning("JSON decode error on attempt %s: %s", attempt, e)
+                    last_exc = e
+
+        except (requests.Timeout, requests.ConnectionError) as e:
+            logger.warning(
+                "API-Football network/timeout error on attempt %s/%s: %s",
+                attempt,
+                max_retries,
+                e,
+            )
+            last_exc = e
+
+        # ako nismo vratili response, spremamo backoff i novi pokušaj
+        if attempt < max_retries:
+            backoff = RETRY_BACKOFF_BASE * (2 ** (attempt - 1))
+            time.sleep(backoff)
+
+    # Ako smo iscrpeli retry-e
+    raise RuntimeError(f"API-Football request failed after {max_retries} attempts: {last_exc}")
+
+
+# ---------------------------------------------------------------------
+# Status / health
+# ---------------------------------------------------------------------
+
+def get_api_status() -> Dict[str, Any]:
+    """
+    Wrapper za /status
+    Vraća dict:
+    {
+      "ok": bool,
+      "raw": ...,
+      "rate_limit": { ... }
+    }
+    """
+    path = "status"
+    resp = _request(path, params={})
+
+    # pokušaćemo da pokupimo rate-limit iz raw headera – ali ovde ih nemamo jer
+    # requests objekt je već "nestao". Ako želiš 100% header pristup,
+    # možeš da napraviš poseban low-level wrapper koji vraća i response.
+    # Ovde rešavamo preko drugog GET-a bez retry-a i iz response headers.
+    # (pošto je health-check 1x dnevno, nije problem)
+
+    # Napravi direktan poziv bez abstract wrappera, samo za header info:
+    status_url = f"{API_BASE.rstrip('/')}/{path}"
+    headers = {
+        "x-apisports-key": API_KEY,
+        "Accept": "application/json",
+    }
+    rl_info: Dict[str, Any] = {}
+    try:
+        raw_resp = requests.get(status_url, headers=headers, timeout=10)
+        rl_info = {
+            "x-ratelimit-requests-limit": raw_resp.headers.get("x-ratelimit-requests-limit"),
+            "x-ratelimit-requests-remaining": raw_resp.headers.get("x-ratelimit-requests-remaining"),
+            "x-ratelimit-requests-reset": raw_resp.headers.get("x-ratelimit-requests-reset"),
+        }
+    except Exception as e:
+        logger.warning("Failed to fetch rate-limit headers: %s", e)
+
+    errors = resp.get("errors")
+    ok = not errors and (resp.get("response") is not None)
+
+    return {
+        "ok": ok,
+        "raw": resp,
+        "rate_limit": rl_info,
+    }
+
+
+# ---------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------
+
+def fetch_fixtures_by_date(target_date: str) -> Dict[str, Any]:
+    """
+    /fixtures?date=YYYY-MM-DD
+    """
+    return _request("fixtures", params={"date": target_date})
+
+
+# ---------------------------------------------------------------------
+# Odds
+# ---------------------------------------------------------------------
+
+def fetch_odds_by_date(target_date: str) -> Dict[str, Any]:
+    """
+    /odds?date=YYYY-MM-DD
+    Napomena: API-FOOTBALL ima više varijacija (odds/live, odds/between, itd),
+    ovde koristimo osnovni daily snapshot.
+    """
+    return _request("odds", params={"date": target_date})
+
+
+# ---------------------------------------------------------------------
+# Standings
+# ---------------------------------------------------------------------
+
+def fetch_standings(league_id: int, season: int) -> Dict[str, Any]:
+    """
+    /standings?league={league_id}&season={season}
+    """
+    return _request("standings", params={"league": league_id, "season": season})
+
+
+# ---------------------------------------------------------------------
+# Team Statistics
+# ---------------------------------------------------------------------
+
+def fetch_team_stats(league_id: int, season: int, team_id: int) -> Dict[str, Any]:
+    """
+    /teams/statistics?league={league_id}&season={season}&team={team_id}
+    """
+    return _request(
+        "teams/statistics",
+        params={
+            "league": league_id,
+            "season": season,
+            "team": team_id,
+        },
+    )
+
+
+# ---------------------------------------------------------------------
+# H2H (Head-to-Head)
+# ---------------------------------------------------------------------
+
+def fetch_h2h(home_id: int, away_id: int, last: int = 5) -> Dict[str, Any]:
+    """
+    /fixtures/headtohead?h2h={home_id}-{away_id}&last={last}
+    """
+    h2h_str = f"{home_id}-{away_id}"
+    return _request(
+        "fixtures/headtohead",
+        params={
+            "h2h": h2h_str,
+            "last": last,
+        },
+    )
