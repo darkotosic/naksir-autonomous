@@ -1,48 +1,59 @@
 # builders/builder_over_15.py
-from typing import List, Dict, Any
-from builders.mixer import mix_tickets
+from __future__ import annotations
 
-# očekujemo da ingest već ima fixtures + odds u cache ili ih primiš kroz parametar
+from typing import Any, Dict, List
 
-def build_over_15_legs(fixtures: Dict[str, Any], odds: Dict[str, Any]) -> List[Dict[str, Any]]:
+from .common import (
+    is_fixture_playable,
+    build_odds_index,
+    get_market_odds,
+    build_leg,
+)
+
+BET_NAME = "Goals Over/Under"
+VALUE_LABEL = "Over 1.5"
+MARKET_CODE = "O15"
+MARKET_FAMILY = "GOALS"
+PICK_LABEL = "Over 1.5 Goals"
+
+
+def build_over_15_legs(
+    fixtures: List[Dict[str, Any]],
+    odds: List[Dict[str, Any]],
+    max_legs: int = 100,
+) -> List[Dict[str, Any]]:
     """
-    Iz fixtures + odds pravi legs za tržište Over 1.5.
-
-    Return: list[leg]
-    leg struktura (predlog standarda):
-      {
-        "fixture_id": 12345,
-        "league_name": "England – Premier League",
-        "home": "Arsenal",
-        "away": "Burnley",
-        "market": "O15",
-        "pick": "Over 1.5 Goals",
-        "odds": 1.23,
-        "kickoff": "2025-11-17T20:00:00Z"
-      }
+    Builder za Total Goals Over 1.5.
     """
-    legs = []
+    if not fixtures or not odds:
+        return []
 
-    # OVDE ubacuješ postojeće filtere iz focus-bets / Telegram-Tickets:
-    # - allow_ligs
-    # - max/min odds
-    # - forma, golovi, xG...
-    for f in fixtures.get("response", []):
-        fixture_id = f.get("fixture", {}).get("id")
-        # ... izvučeš ligu, timove, vreme, itd.
-        # ... nađeš odgovarajući odds u "odds" strukturi
-        # ... primeniš pravila (1.10–1.40, bar 60% scoring metrics, itd.)
-        # ako meč zadovoljava:
-        leg = {
-            "fixture_id": fixture_id,
-            "league_name": f.get("league", {}).get("name"),
-            "home": f.get("teams", {}).get("home", {}).get("name"),
-            "away": f.get("teams", {}).get("away", {}).get("name"),
-            "market": "O15",
-            "pick": "Over 1.5 Goals",
-            "odds": 1.23,  # TODO: izračunaj iz odds data
-            "kickoff": f.get("fixture", {}).get("date"),
-        }
-        legs.append(leg)
+    odds_index = build_odds_index(odds)
+    legs: List[Dict[str, Any]] = []
 
-    return legs
+    for fx in fixtures or []:
+        if not is_fixture_playable(fx):
+            continue
+
+        fixture = fx.get("fixture") or {}
+        fid = fixture.get("id")
+        if fid is None:
+            continue
+
+        odd_val = get_market_odds(odds_index, int(fid), BET_NAME, VALUE_LABEL)
+        if odd_val is None:
+            continue
+
+        leg = build_leg(
+            fx,
+            market=MARKET_CODE,
+            market_family=MARKET_FAMILY,
+            pick=PICK_LABEL,
+            odds=odd_val,
+        )
+        if leg:
+            legs.append(leg)
+
+    # sortiraj po kickoff-u pa po kvoti (veća kvota prvo)
+    legs_sorted = sorted(legs, key=lambda x: (x["kickoff"], -x["odds"]))
+    return legs_sorted[:max_legs]
