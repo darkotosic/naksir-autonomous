@@ -226,6 +226,49 @@ TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
     },
 ]
 
+    # ------------------------------------------------------------------
+    # OPTIMIZATION PACK — NEW MIX SETS
+    # ------------------------------------------------------------------
+    {
+        "code": "SET_MIX_O15_O25",
+        "label": "[MIX] Over 1.5 + Over 2.5",
+        "markets": ["O15", "O25"],
+        "market_family": "GOALS",
+        "legs_min": 2,
+        "legs_max": 4,
+        "min_total_odds": 2.00,
+        "max_total_odds": 3.20,
+        "max_tickets": 3,
+        # max 2 puta isti market family po tiketu
+        "max_family_per_ticket": 2,
+    },
+    {
+        "code": "SET_MIX_U35_BTTS",
+        "label": "[MIX] Under 3.5 + BTTS",
+        "markets": ["U35", "BTTS_YES", "BTTS_NO"],
+        "market_family": "MIX_U35_BTTS",
+        "legs_min": 2,
+        "legs_max": 4,
+        "min_total_odds": 2.00,
+        "max_total_odds": 3.50,
+        "max_tickets": 3,
+        # max 2 legs iz iste family (npr. da ne budu 3x BTTS)
+        "max_family_per_ticket": 2,
+    },
+    {
+        "code": "SET_MIX_HOME_DC",
+        "label": "[MIX] Home Win + DC",
+        "markets": ["HOME", "1X", "X2"],
+        "market_family": "WIN_DC",
+        "legs_min": 2,
+        "legs_max": 4,
+        "min_total_odds": 2.00,
+        "max_total_odds": 3.00,
+        "max_tickets": 3,
+        # max 2 legs iz WIN/DC familije po tiketu
+        "max_family_per_ticket": 2,
+    },
+
 
 def _build_legs_for_builders(
     fixtures: List[Dict[str, Any]],
