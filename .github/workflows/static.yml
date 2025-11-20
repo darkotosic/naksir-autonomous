@@ -37,7 +37,10 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          # minimalni set eksternih biblioteka
+         pip install requests httpx
+         # plus sve iz requirements.txt (sad imamo i requests i httpx tu)
+         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
       - name: Run morning autonomous pipeline
         run: |
