@@ -13,7 +13,7 @@ import {
 } from "../types/tickets";
 
 // GitHub Pages base URL (Naksir Autonomous)
-const FEED_BASE = "https://darktocsic.github.io/naksir-autonomous";
+const FEED_BASE = "https://darkotosic.github.io/naksir-autonomous";
 
 // Direktni URL-ovi
 const TICKETS_URL = `${FEED_BASE}/tickets.json`;

@@ -4,91 +4,170 @@ import {
   View,
   Text,
   StyleSheet,
+  Pressable,
+  Linking,
+  SafeAreaView,
   ScrollView,
-  RefreshControl,
-  ActivityIndicator,
 } from "react-native";
-import { useTickets } from "../hooks/useTickets";
-import { TicketCard } from "../components/TicketCard";
+import { useRouter } from "expo-router";
 import { Colors, layout } from "../constants/theme";
 
-export default function TodayTicketsScreen() {
-  const { loading, error, date, sets, reload } = useTickets();
+const legalLinks = [
+  { label: "Legal", url: "https://naksirpredictions.top/legal-disclaimer" },
+  { label: "Privacy", url: "https://naksirpredictions.top/privacy-policy" },
+  { label: "Terms of Use", url: "https://naksirpredictions.top/terms-of-use" },
+];
+
+export default function LandingScreen() {
+  const router = useRouter();
 
   return (
-    <View style={s.screen}>
-      <ScrollView
-        style={s.scroll}
-        contentContainerStyle={s.content}
-        refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={reload} tintColor={Colors.accent} />
-        }
-      >
-        <Text style={s.heading}>Naksir Autonomous Tickets</Text>
-        {date ? <Text style={s.subHeading}>📅 {date}</Text> : null}
+    <SafeAreaView style={s.safeArea}>
+      <ScrollView contentContainerStyle={s.container}>
+        <View style={s.glowLayer} />
 
-        {loading && !sets.length && (
-          <ActivityIndicator style={{ marginTop: 30 }} size="large" />
-        )}
+        <Text style={s.logo}>Naksir Ultimate</Text>
+        <Text style={s.tagline}>2+ Tickets, AI assisted — football neon edition.</Text>
 
-        {error ? <Text style={s.error}>⚠️ {error}</Text> : null}
+        <View style={s.linksRow}>
+          {legalLinks.map((link) => (
+            <Pressable
+              key={link.label}
+              onPress={() => Linking.openURL(link.url)}
+              style={({ pressed }) => [s.linkButton, pressed && s.pressed]}
+            >
+              <Text style={s.linkText}>{link.label}</Text>
+            </Pressable>
+          ))}
+        </View>
 
-        {sets.map((set) => (
-          <View key={set.code} style={s.setBlock}>
-            <Text style={s.setTitle}>{set.label || set.code}</Text>
-            {set.tickets.map((t) => (
-              <TicketCard key={t.ticket_id} ticket={t} />
-            ))}
-          </View>
-        ))}
+        <Pressable
+          onPress={() => Linking.openURL("https://t.me/naksiranalysis")}
+          style={({ pressed }) => [s.primaryButton, pressed && s.pressed]}
+        >
+          <Text style={s.primaryText}>Telegram</Text>
+          <Text style={s.subText}>Join our analysis channel</Text>
+        </Pressable>
 
-        {!loading && !error && !sets.length && (
-          <Text style={s.empty}>Nema tiketa za danas.</Text>
-        )}
+        <Pressable
+          onPress={() => router.push("/tickets")}
+          style={({ pressed }) => [s.ctaButton, pressed && s.pressed]}
+        >
+          <Text style={s.ctaLabel}>Cool design Naksir Ultimate 2+ Tickets</Text>
+          <Text style={s.ctaHint}>Enter the neon locker room →</Text>
+        </Pressable>
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const s = StyleSheet.create({
-  screen: {
+  safeArea: {
     flex: 1,
     backgroundColor: Colors.background,
   },
-  scroll: {
-    flex: 1,
-  },
-  content: {
+  container: {
+    flexGrow: 1,
     padding: layout.paddingScreen,
-    paddingBottom: 32,
+    alignItems: "center",
+    gap: 18,
   },
-  heading: {
-    color: Colors.textPrimary,
-    fontSize: 20,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-    marginBottom: 4,
+  glowLayer: {
+    position: "absolute",
+    top: -120,
+    width: 380,
+    height: 380,
+    borderRadius: 999,
+    backgroundColor: "rgba(57,255,20,0.08)",
+    shadowColor: Colors.accent,
+    shadowRadius: 60,
+    shadowOpacity: 0.6,
+    shadowOffset: { width: 0, height: 0 },
   },
-  subHeading: {
-    color: Colors.textSecondary,
-    fontSize: 13,
-    marginBottom: 14,
-  },
-  setBlock: {
-    marginBottom: 24,
-  },
-  setTitle: {
+  logo: {
+    marginTop: 12,
     color: Colors.accent,
-    fontSize: 15,
-    fontWeight: "700",
-    marginBottom: 10,
+    fontSize: 30,
+    fontWeight: "900",
+    letterSpacing: 1,
+    textShadowColor: Colors.accent,
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 12,
   },
-  error: {
-    color: Colors.danger,
-    marginTop: 16,
-  },
-  empty: {
+  tagline: {
     color: Colors.textSecondary,
-    marginTop: 24,
+    textAlign: "center",
+    fontSize: 14,
+    maxWidth: 320,
+  },
+  linksRow: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 10,
+    marginTop: 6,
+  },
+  linkButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.accentBorder,
+    backgroundColor: Colors.card,
+    alignItems: "center",
+    ...layout.shadow,
+  },
+  linkText: {
+    color: Colors.textPrimary,
+    fontWeight: "700",
+    letterSpacing: 0.5,
+  },
+  primaryButton: {
+    width: "100%",
+    paddingVertical: 16,
+    borderRadius: 14,
+    backgroundColor: Colors.telegram,
+    borderWidth: 1,
+    borderColor: "rgba(0,136,204,0.9)",
+    ...layout.shadow,
+    shadowColor: Colors.telegram,
+    alignItems: "center",
+    gap: 4,
+  },
+  primaryText: {
+    color: "#e9f6ff",
+    fontSize: 18,
+    fontWeight: "800",
+    letterSpacing: 0.4,
+  },
+  subText: {
+    color: "#d4e8ff",
+    fontSize: 13,
+  },
+  ctaButton: {
+    width: "100%",
+    paddingVertical: 18,
+    borderRadius: 16,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    alignItems: "center",
+    ...layout.shadow,
+  },
+  ctaLabel: {
+    color: Colors.textPrimary,
+    fontSize: 17,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    textAlign: "center",
+  },
+  ctaHint: {
+    marginTop: 6,
+    color: Colors.accent,
+    fontSize: 13,
+  },
+  pressed: {
+    transform: [{ scale: 0.99 }],
+    opacity: 0.95,
   },
 });

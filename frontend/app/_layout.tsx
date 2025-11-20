@@ -16,15 +16,16 @@ function CustomDrawerContent(props: DrawerContentComponentProps) {
   const close = () => props.navigation.closeDrawer();
 
   const items = [
-    { label: "Today Tickets", action: () => router.push("/") },
+    { label: "Home", action: () => router.push("/") },
+    { label: "Naksir Tickets", action: () => router.push("/tickets") },
     { label: "Results / Evaluation", action: () => router.push("/results") },
     {
       label: "Legal & Disclaimer",
-      action: () => router.push("/legal"),
+      action: () => Linking.openURL("https://naksirpredictions.top/legal-disclaimer"),
     },
     {
       label: "Naksir Telegram",
-      action: () => Linking.openURL("https://t.me/betsmart_win_more"),
+      action: () => Linking.openURL("https://t.me/naksiranalysis"),
     },
   ];
 
