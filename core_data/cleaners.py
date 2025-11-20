@@ -46,7 +46,7 @@ def clean_fixtures(raw: Any) -> List[Dict[str, Any]]:
             continue
 
         status = (fixture.get("status") or {}).get("short")
-        if status in {"FT", "FT", "AET", "PEN", "CANC", "ABD", "PST", "AWD", "WO"}:
+        if status in {"FT", "AET", "PEN", "CANC", "ABD", "PST", "AWD", "WO"}:
             continue
 
         cleaned.append(item)
@@ -58,9 +58,13 @@ def clean_fixtures(raw: Any) -> List[Dict[str, Any]]:
 # MARKET MAPPING FOR ODDS
 # ---------------------------------------------------------------------------
 
-def _map_market(bet_name: str, label: str) -> Optional[str]:
-    bn = (bet_name or "").strip().lower()
-    lv = (label or "").strip().lower()
+def _map_market(bet_name: Any, label: Any) -> Optional[str]:
+    """
+    bet_name i label mogu biti int / float / bilo šta iz API-ja,
+    zato ih OBAVEZNO kastujemo u string pre strip/lower.
+    """
+    bn = str(bet_name or "").strip().lower()
+    lv = str(label or "").strip().lower()
 
     # Match Winner
     if bn == "match winner":
@@ -89,13 +93,19 @@ def _map_market(bet_name: str, label: str) -> Optional[str]:
             return None
         side, line = parts
         if side == "over":
-            if line == "0.5": return "O05"
-            if line == "1.5": return "O15"
-            if line == "2.5": return "O25"
-            if line == "3.5": return "O35"
+            if line == "0.5":
+                return "O05"
+            if line == "1.5":
+                return "O15"
+            if line == "2.5":
+                return "O25"
+            if line == "3.5":
+                return "O35"
         if side == "under":
-            if line == "2.5": return "U25"
-            if line == "3.5": return "U35"
+            if line == "2.5":
+                return "U25"
+            if line == "3.5":
+                return "U35"
         return None
 
     # First Half Over 0.5
@@ -104,8 +114,10 @@ def _map_market(bet_name: str, label: str) -> Optional[str]:
 
     # BTTS
     if "both teams to score" in bn or "btts" in bn:
-        if lv == "yes": return "BTTS_YES"
-        if lv == "no": return "BTTS_NO"
+        if lv == "yes":
+            return "BTTS_YES"
+        if lv == "no":
+            return "BTTS_NO"
         return None
 
     return None
@@ -133,30 +145,31 @@ def clean_odds(raw: Any) -> List[Dict[str, Any]]:
             continue
 
         for bm in item.get("bookmakers") or []:
-            bookmaker_name = (bm.get("name") or "").strip()
+            # može da bude i int iz API-ja – zato str(...)
+            bookmaker_name = str(bm.get("name") or "").strip()
 
             for bet in bm.get("bets") or []:
-                bet_name = bet.get("name")
-                if not bet_name:
+                bet_name_raw = bet.get("name")
+                if bet_name_raw is None:
                     continue
 
                 for val in bet.get("values") or []:
-                    label = val.get("value")
+                    label_raw = val.get("value")
                     odd_str = val.get("odd")
                     try:
                         odd_val = float(odd_str)
-                    except:
+                    except Exception:
                         continue
 
-                    market = _map_market(bet_name, label)
+                    market = _map_market(bet_name_raw, label_raw)
 
                     cleaned.append(
                         {
                             "fixture_id": int(fid),
                             "league_id": int(lid),
                             "bookmaker": bookmaker_name,
-                            "bet_name": bet_name,
-                            "label": label,
+                            "bet_name": str(bet_name_raw),
+                            "label": str(label_raw) if label_raw is not None else "",
                             "market": market,
                             "odd": odd_val,
                         }
@@ -180,9 +193,12 @@ def clean_standings(raw: Any) -> List[Dict[str, Any]]:
     ]
     """
     response = _safe_response(raw)
-    cleaned = []
+    cleaned: List[Dict[str, Any]] = []
 
     for item in response:
+        if not isinstance(item, dict):
+            continue
+
         league = item.get("league") or {}
         tables = item.get("standings") or []
 
@@ -223,11 +239,12 @@ def clean_h2h(raw: Any) -> List[Dict[str, Any]]:
     Vraća listu poslednjih mečeva između timova.
     """
     response = _safe_response(raw)
-    cleaned = []
+    cleaned: List[Dict[str, Any]] = []
 
     for item in response:
         if not isinstance(item, dict):
             continue
+
         fx = item.get("fixture") or {}
         teams = item.get("teams") or {}
 
