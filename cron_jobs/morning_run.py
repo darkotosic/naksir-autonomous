@@ -17,8 +17,10 @@ from core_data.cache import read_json
 from builders.engine import build_all_ticket_sets
 from outputs.pages_writer import write_tickets_json
 from outputs.telegram_bot import send_message
-from ai_engine.meta import annotate_ticket_sets_with_score
-
+from ai_engine.meta import (
+    annotate_ticket_sets_with_score,
+    get_adaptive_min_score,
+)
 
 TELEGRAM_MORNING_CHAT_ID = os.getenv("TELEGRAM_MORNING_CHAT_ID", "").strip()
 
@@ -193,8 +195,13 @@ def main() -> None:
     except Exception as e:
         print(f"[WARN] annotate_ticket_sets_with_score failed: {e}")
 
-    # 3b) Filter po AI score >= 62
-    MIN_SCORE = 62.0
+    # 3b) Adaptivni AI filter
+    fixtures_count = len(fixtures)
+    MIN_SCORE = get_adaptive_min_score(
+        fixtures_count=fixtures_count,
+        raw_total_tickets=total_tickets_raw,
+    )
+
     filtered_sets: List[Dict[str, Any]] = []
     for s in ticket_sets.get("sets", []) or []:
         tickets = s.get("tickets", [])
@@ -206,7 +213,7 @@ def main() -> None:
             else:
                 print(
                     f"[FILTER] Dropped ticket {t.get('ticket_id')} from set {s.get('code')} "
-                    f"due to low score={score:.1f} (< {MIN_SCORE})"
+                    f"due to low score={score:.1f} (< {MIN_SCORE:.1f})"
                 )
         if kept:
             s2 = dict(s)
@@ -218,7 +225,7 @@ def main() -> None:
     sets_after = ticket_sets.get("sets", []) or []
     total_tickets_after = sum(len(s.get("tickets", [])) for s in sets_after)
     print(
-        f"[ENGINE] After AI filter (score >= {MIN_SCORE}) "
+        f"[ENGINE] After AI filter (score >= {MIN_SCORE:.1f}) "
         f"sets={len(sets_after)}, total tickets={total_tickets_after}"
     )
     for s in sets_after:
