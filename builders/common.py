@@ -4,8 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
 
-
-# Lige koje preferiramo za glavne tikete
+# Zadržavamo listu preferiranih liga radi kasnijeg ponderisanja ili specijalnih pravila,
+# ali je VIŠE NE KORISTIMO kao hard filter u is_fixture_playable (global pool).
 ALLOWED_LEAGUES: Set[int] = {
     39,   # England Premier League
     140,  # Spain La Liga
@@ -37,17 +37,24 @@ def parse_kickoff(fixture: Dict[str, Any]) -> Optional[str]:
 
 def is_fixture_playable(fixture: Dict[str, Any]) -> bool:
     """
-    Basic filter:
-    - liga u ALLOWED_LEAGUES
-    - status NS / TBD (nije počelo)
+    Global pool varijanta:
+
+    - DOZVOLJAVA SVE LIGE (nema više ALLOWED_LEAGUES filtera)
+    - i dalje traži da:
+        * fixture ima league_id
+        * status je NS / TBD / None (nije počelo)
     """
     league = fixture.get("league") or {}
     lid = league.get("id")
-    if lid not in ALLOWED_LEAGUES:
+
+    # Minimalna validacija: mora da postoji league_id
+    if lid is None:
         return False
 
     fx = fixture.get("fixture") or {}
     status = (fx.get("status") or {}).get("short")
+
+    # Dozvoljavamo samo mečeve koji još nisu krenuli
     if status not in (None, "NS", "TBD"):
         return False
 
@@ -84,19 +91,29 @@ def get_market_odds(
 ) -> Optional[float]:
     """
     Pronalazi kvotu za zadati market:
+
     - bet_name npr. "Goals Over/Under"
     - value_label npr. "Over 2.5"
 
-    Vraća najnižu kvotu (konzervativno) među bookmakerima ili None.
+    Poboljšanja:
+    - case-insensitive i trim сравнение (manje pucanja na "goals over/under", "Over 2.5 ")
+    - vraća NAJNIŽU kvotu (konzervativno) među bookmakerima ili None.
     """
     rows = odds_index.get(fixture_id) or []
     found: List[float] = []
 
+    bet_name_key = (bet_name or "").strip().lower()
+    label_key = (value_label or "").strip().lower()
+
     for r in rows:
-        if r.get("bet_name") != bet_name:
+        r_bet = (r.get("bet_name") or "").strip().lower()
+        r_label = (r.get("label") or "").strip().lower()
+
+        if r_bet != bet_name_key:
             continue
-        if r.get("label") != value_label:
+        if r_label != label_key:
             continue
+
         odd_val = r.get("odd")
         try:
             if odd_val is not None:
