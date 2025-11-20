@@ -27,7 +27,7 @@ export default function LandingScreen() {
         <View style={s.glowLayer} />
 
         <Text style={s.logo}>Naksir Ultimate</Text>
-        <Text style={s.tagline}>2+ Tickets, AI assisted — football neon edition.</Text>
+        <Text style={s.tagline}>2+ Tickets, AI assisted — Naksir soccer analyst.</Text>
 
         <View style={s.linksRow}>
           {legalLinks.map((link) => (
@@ -53,8 +53,8 @@ export default function LandingScreen() {
           onPress={() => router.push("/tickets")}
           style={({ pressed }) => [s.ctaButton, pressed && s.pressed]}
         >
-          <Text style={s.ctaLabel}>Cool design Naksir Ultimate 2+ Tickets</Text>
-          <Text style={s.ctaHint}>Enter the neon locker room →</Text>
+          <Text style={s.ctaLabel}>Naksir Ultimate 2+ Tickets</Text>
+          <Text style={s.ctaHint}>Enter for daily updated Tickets →</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
