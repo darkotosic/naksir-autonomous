@@ -4,13 +4,41 @@ from __future__ import annotations
 from pathlib import Path
 from datetime import date
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 
 
 def _ensure_public_dir() -> None:
     PUBLIC_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _summarize_ticket_sets(ticket_sets: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Deriviše osnovnu statistiku nad generisanim setovima/tiketima
+    kako bi frontend imao jednostavan izvor istine.
+    """
+
+    sets: List[Dict[str, Any]] = []
+    raw_sets = ticket_sets.get("sets")
+    if isinstance(raw_sets, list):
+        sets = [s for s in raw_sets if isinstance(s, dict)]
+
+    tickets_total = 0
+    status_counts: Dict[str, int] = {}
+
+    for s in sets:
+        status = str(s.get("status") or "").upper() or "UNKNOWN"
+        status_counts[status] = status_counts.get(status, 0) + 1
+        tickets_total += len(s.get("tickets", []) or [])
+
+    return {
+        "date": ticket_sets.get("date") or date.today().isoformat(),
+        "generated_at": ticket_sets.get("generated_at"),
+        "sets_total": len(sets),
+        "tickets_total": tickets_total,
+        "status_counts": status_counts,
+    }
 
 
 def write_tickets_json(ticket_sets: Dict[str, Any]) -> None:
@@ -24,7 +52,10 @@ def write_tickets_json(ticket_sets: Dict[str, Any]) -> None:
     _ensure_public_dir()
 
     data = {
-        "date": date.today().isoformat(),
+        "date": ticket_sets.get("date") or date.today().isoformat(),
+        "generated_at": ticket_sets.get("generated_at"),
+        "meta": ticket_sets.get("meta"),
+        "summary": ticket_sets.get("summary") or _summarize_ticket_sets(ticket_sets),
         "sets": ticket_sets.get("sets", []),
     }
     fp = PUBLIC_DIR / "tickets.json"
