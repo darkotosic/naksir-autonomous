@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Naksir Autonomous Tickets</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0b1224;
+      --panel: rgba(15, 23, 42, 0.9);
+      --border: rgba(148, 163, 184, 0.2);
+      --muted: #cbd5e1;
+      --text: #e2e8f0;
+      --accent: #38bdf8;
+      --success: #22c55e;
+      --warn: #f97316;
+      --error: #ef4444;
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at 10% 20%, rgba(59, 130, 246, 0.1), transparent 30%),
+        radial-gradient(circle at 80% 0%, rgba(126, 34, 206, 0.12), transparent 35%),
+        var(--bg);
+      display: flex;
+      justify-content: center;
+      padding: 32px 18px 48px;
+      box-sizing: border-box;
+    }
+
+    .page {
+      width: min(1200px, 100%);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .header {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .eyebrow {
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--accent);
+      font-size: 0.85rem;
+      margin: 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 2rem;
+      letter-spacing: 0.3px;
+    }
+
+    .sub {
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--panel);
+    }
+
+    .metric h3 {
+      margin: 0 0 4px;
+      font-size: 0.95rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .metric strong {
+      font-size: 1.2rem;
+    }
+
+    .section {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .alert {
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.12);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .alert.error {
+      border-color: rgba(239, 68, 68, 0.5);
+      color: #fecdd3;
+    }
+
+    .alert.success {
+      border-color: rgba(34, 197, 94, 0.5);
+      color: #bbf7d0;
+    }
+
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+    }
+
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      background: var(--panel);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .card header {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .title-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.8rem;
+      border: 1px solid var(--border);
+      background: rgba(59, 130, 246, 0.12);
+      color: #bfdbfe;
+    }
+
+    .badge.ok { border-color: rgba(34, 197, 94, 0.5); color: #bbf7d0; background: rgba(34, 197, 94, 0.15); }
+    .badge.partial { border-color: rgba(249, 115, 22, 0.5); color: #fed7aa; background: rgba(249, 115, 22, 0.15); }
+    .badge.fallback { border-color: rgba(37, 99, 235, 0.5); color: #bfdbfe; background: rgba(37, 99, 235, 0.15); }
+    .badge.error { border-color: rgba(239, 68, 68, 0.5); color: #fecdd3; background: rgba(239, 68, 68, 0.15); }
+
+    .muted { color: var(--muted); font-size: 0.95rem; }
+
+    .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .tag {
+      padding: 4px 8px;
+      border-radius: 8px;
+      background: rgba(148, 163, 184, 0.15);
+      border: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .ticket-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .ticket {
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 12px;
+      padding: 12px;
+      background: rgba(59, 130, 246, 0.05);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .ticket header {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .legs {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .leg {
+      padding: 8px;
+      border-radius: 10px;
+      border: 1px dashed rgba(148, 163, 184, 0.25);
+      background: rgba(148, 163, 184, 0.04);
+    }
+
+    .leg strong { display: block; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <p class="eyebrow">AI Ticket Sets • GitHub Pages artifact</p>
+      <h1>Naksir Autonomous Tickets</h1>
+      <p class="sub">Frontend usklađen sa backend pipeline-om (cron_jobs/morning_run.py → outputs/pages_writer.py).</p>
+      <div id="meta" class="meta-grid"></div>
+    </header>
+
+    <section class="section">
+      <div id="alert" class="alert">Loading ticket sets…</div>
+      <div id="statusGrid" class="status-grid"></div>
+    </section>
+
+    <section id="cards" class="section"></section>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const safeArray = (v) => (Array.isArray(v) ? v : []);
+
+    const STATUS_MAP = {
+      OK: { label: "OK", cls: "ok" },
+      PARTIAL: { label: "Partial", cls: "partial" },
+      FALLBACK_1: { label: "Fallback (1 ticket)", cls: "fallback" },
+      FALLBACK_2: { label: "Fallback (mix)", cls: "fallback" },
+      NO_DATA: { label: "No data", cls: "error" },
+      UNKNOWN: { label: "Unknown", cls: "error" },
+    };
+
+    function badge(statusRaw) {
+      const key = String(statusRaw || "UNKNOWN").toUpperCase();
+      const conf = STATUS_MAP[key] || STATUS_MAP.UNKNOWN;
+      return `<span class="badge ${conf.cls}">${conf.label}</span>`;
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short",
+      });
+    }
+
+    function setAlert(type, message) {
+      const el = $("alert");
+      el.className = `alert ${type || ""}`.trim();
+      el.textContent = message;
+    }
+
+    function renderMeta(summary, meta, sets) {
+      const metaGrid = $("meta");
+      metaGrid.innerHTML = "";
+
+      const items = [
+        { label: "Date", value: summary.date || "—" },
+        { label: "Generated at", value: fmtDate(summary.generated_at || meta?.generated_at) },
+        { label: "AI min score", value: meta?.min_score ? `${meta.min_score.toFixed(1)}+` : "—" },
+        { label: "Fixtures (cache)", value: meta?.fixtures_count ?? "—" },
+        { label: "Odds rows", value: meta?.odds_count ?? "—" },
+        { label: "Raw sets / tickets", value: meta ? `${meta.raw_sets ?? "—"} / ${meta.raw_total_tickets ?? "—"}` : "—" },
+        {
+          label: "After AI filter",
+          value: meta ? `${meta.sets_after_filter ?? "—"} / ${meta.tickets_after_filter ?? "—"}` : "—",
+        },
+        { label: "Published sets", value: summary.sets_total ?? sets.length },
+        { label: "Published tickets", value: summary.tickets_total ?? "—" },
+      ];
+
+      items.forEach((item) => {
+        const card = document.createElement("div");
+        card.className = "metric";
+        card.innerHTML = `<h3>${item.label}</h3><strong>${item.value}</strong>`;
+        metaGrid.appendChild(card);
+      });
+    }
+
+    function renderStatusGrid(summary) {
+      const grid = $("statusGrid");
+      grid.innerHTML = "";
+
+      const statusCounts = summary.status_counts || {};
+      const keys = Object.keys(statusCounts);
+      if (!keys.length) return;
+
+      keys.forEach((key) => {
+        const value = statusCounts[key];
+        const card = document.createElement("div");
+        card.className = "metric";
+        card.innerHTML = `<h3>${key}</h3><strong>${value}</strong>`;
+        grid.appendChild(card);
+      });
+    }
+
+    function renderLeg(leg, index) {
+      const league = leg.league_country || leg.country || "";
+      const leagueName = leg.league_name || leg.league || "";
+      const home = leg.home || leg.teams?.home?.name || "Home";
+      const away = leg.away || leg.teams?.away?.name || "Away";
+      const kickoff = leg.kickoff || leg.fixture?.date || "";
+      const market = leg.market || leg.market_family || "Market";
+      const pick = leg.pick || leg.choice || "Pick";
+      const odds = leg.odds ?? "—";
+
+      return `
+        <div class="leg">
+          <strong>Leg ${index + 1} · ${league} ${leagueName}</strong>
+          <div class="muted">${fmtDate(kickoff)}</div>
+          <div>${home} vs ${away}</div>
+          <div class="muted">${market} → ${pick} @ ${odds}</div>
+        </div>
+      `;
+    }
+
+    function renderTicket(ticket) {
+      const legs = safeArray(ticket.legs);
+      const score = ticket.score != null ? `${ticket.score}%` : "—";
+      return `
+        <article class="ticket">
+          <header>
+            <div><strong>${ticket.ticket_id || "Ticket"}</strong></div>
+            <div class="tags">
+              <span class="tag">Total odds: ${ticket.total_odds ?? "—"}</span>
+              <span class="tag">Score: ${score}</span>
+            </div>
+          </header>
+          <div class="legs">
+            ${legs.map((leg, i) => renderLeg(leg, i)).join("") || '<div class="muted">No legs found.</div>'}
+          </div>
+        </article>
+      `;
+    }
+
+    function renderSetCard(set) {
+      const card = document.createElement("article");
+      card.className = "card";
+
+      const tickets = safeArray(set.tickets);
+
+      card.innerHTML = `
+        <header>
+          <div class="title-row">
+            <h3>${set.label || set.code || "Ticket set"}</h3>
+            ${badge(set.status)}
+          </div>
+          <div class="muted">Code: ${set.code || "N/A"}</div>
+        </header>
+        <div class="tags">
+          <span class="tag">Tickets: ${tickets.length}</span>
+          <span class="tag">Requested: ${set.requested_max_tickets ?? "—"}</span>
+          <span class="tag">Effective: ${set.effective_max_tickets ?? "—"}</span>
+          <span class="tag">Legs pool: ${set.legs_pool_size ?? "—"}</span>
+        </div>
+        <div class="ticket-list">
+          ${tickets.map(renderTicket).join("") || '<div class="muted">No tickets after AI filter.</div>'}
+        </div>
+      `;
+
+      return card;
+    }
+
+    function renderTickets(data) {
+      const cardsEl = $("cards");
+      cardsEl.innerHTML = "";
+
+      const sets = safeArray(data.sets);
+      const summary = data.summary || {};
+      const meta = data.meta || {};
+
+      renderMeta(summary, meta, sets);
+      renderStatusGrid(summary);
+
+      if (!sets.length) {
+        setAlert("error", "Nema dostupnih setova. Pokreni cron_jobs/morning_run.py da generiše tickets.json.");
+        return;
+      }
+
+      setAlert("success", `${sets.length} setova · ${summary.tickets_total ?? "?"} tiketa`);
+
+      sets.forEach((set) => cardsEl.appendChild(renderSetCard(set)));
+    }
+
+    async function loadTickets() {
+      try {
+        const res = await fetch("tickets.json", { cache: "no-cache" });
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        renderTickets(data);
+      } catch (err) {
+        console.error(err);
+        setAlert("error", `Neuspešno učitavanje tickets.json (${err.message}). Proveri GitHub Pages artifact.`);
+      }
+    }
+
+    loadTickets();
+  </script>
+</body>
+</html>

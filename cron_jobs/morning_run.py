@@ -237,6 +237,25 @@ def main() -> None:
     if not sets_after:
         print("[WARN] No ticket sets left after AI filter. tickets.json will be empty 'sets':[].")
 
+    # osnovna meta za frontend (vidi public/index.html)
+    ticket_sets["meta"] = {
+        "fixtures_count": fixtures_count,
+        "odds_count": len(odds),
+        "min_score": MIN_SCORE,
+        "raw_sets": len(sets),
+        "raw_total_tickets": total_tickets_raw,
+        "sets_after_filter": len(sets_after),
+        "tickets_after_filter": total_tickets_after,
+        "generated_at": ticket_sets.get("generated_at"),
+    }
+
+    ticket_sets["summary"] = ticket_sets.get("summary") or {
+        "date": ticket_sets.get("date") or today.isoformat(),
+        "generated_at": ticket_sets.get("generated_at"),
+        "sets_total": len(sets_after),
+        "tickets_total": total_tickets_after,
+    }
+
     # 4) Upis tickets.json za frontend / Pages (LAYER 4)
     try:
         write_tickets_json(ticket_sets)
