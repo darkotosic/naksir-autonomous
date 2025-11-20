@@ -37,7 +37,7 @@ def _is_valid_ticket(
         if family_counts[fam] > max_family_per_ticket:
             return False
 
-    # 3) ukupna kvota u target range (2.00–3.00)
+    # 3) ukupna kvota u target range
     total_odds = _compute_total_odds(legs)
     if total_odds < target_min or total_odds > target_max:
         return False
@@ -60,8 +60,8 @@ def _mix_legs_into_tickets(
     Random mixer nad već izgrađenim legovima.
 
     Pravila:
-      - pokušava da složi 3–5 legova (legs_min/legs_max)
-      - ukupna kvota 2.00–3.00
+      - pokušava da složi legs_min–legs_max legova
+      - ukupna kvota u [target_min, target_max]
       - max_family_per_ticket ograničava koliko puta ista family sme da se pojavi
       - nema duplikata po (fixture_id, market) kombinaciji
     """
@@ -102,7 +102,7 @@ def _mix_legs_into_tickets(
     return tickets
 
 
-# 10 setova – svaki set druga filozofija
+# 10 klasičnih setova + 2 nova MIX seta
 TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
     # 1) Goals MIX: O1.5 + O2.5 + U3.5 (soft mix, max 2 iz iste family)
     {
@@ -164,7 +164,7 @@ TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
         "max_tickets": 3,
         "max_family_per_ticket": 3,
     },
-    # 6) HOME + DC miks (klasičan "sigurniji" set)
+    # 6) HOME + DC miks (Home win + 1X / X2)
     {
         "code": "SET_HOME_DC",
         "label": "[HOME/DC MIX]",
@@ -224,50 +224,31 @@ TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
         "max_tickets": 3,
         "max_family_per_ticket": 3,
     },
-]
-
-    # ------------------------------------------------------------------
-    # OPTIMIZATION PACK — NEW MIX SETS
-    # ------------------------------------------------------------------
+    # 11) MIX O1.5 + O2.5 (optimizacioni set)
     {
         "code": "SET_MIX_O15_O25",
-        "label": "[MIX] Over 1.5 + Over 2.5",
-        "markets": ["O15", "O25"],
-        "market_family": "GOALS",
+        "label": "[MIX O1.5+O2.5]",
+        "builders": ["O15", "O25"],
         "legs_min": 2,
         "legs_max": 4,
-        "min_total_odds": 2.00,
-        "max_total_odds": 3.20,
+        "target_min": 2.0,
+        "target_max": 3.2,
         "max_tickets": 3,
-        # max 2 puta isti market family po tiketu
         "max_family_per_ticket": 2,
     },
+    # 12) MIX U3.5 + BTTS (optimizacioni set)
     {
         "code": "SET_MIX_U35_BTTS",
-        "label": "[MIX] Under 3.5 + BTTS",
-        "markets": ["U35", "BTTS_YES", "BTTS_NO"],
-        "market_family": "MIX_U35_BTTS",
+        "label": "[MIX U3.5+BTTS]",
+        "builders": ["U35", "BTTS_YES", "BTTS_NO"],
         "legs_min": 2,
         "legs_max": 4,
-        "min_total_odds": 2.00,
-        "max_total_odds": 3.50,
+        "target_min": 2.0,
+        "target_max": 3.5,
         "max_tickets": 3,
-        # max 2 legs iz iste family (npr. da ne budu 3x BTTS)
         "max_family_per_ticket": 2,
     },
-    {
-        "code": "SET_MIX_HOME_DC",
-        "label": "[MIX] Home Win + DC",
-        "markets": ["HOME", "1X", "X2"],
-        "market_family": "WIN_DC",
-        "legs_min": 2,
-        "legs_max": 4,
-        "min_total_odds": 2.00,
-        "max_total_odds": 3.00,
-        "max_tickets": 3,
-        # max 2 legs iz WIN/DC familije po tiketu
-        "max_family_per_ticket": 2,
-    },
+]
 
 
 def _build_legs_for_builders(
@@ -355,7 +336,6 @@ def _build_ticket_set_for_config(
             else:
                 status = "NO_DATA"
 
-    # dodaj ID-eve u tikete
     code = config["code"]
     final_tickets: List[Dict[str, Any]] = []
     for idx, t in enumerate(tickets, start=1):
@@ -387,9 +367,9 @@ def build_all_ticket_sets(
     """
     Glavna funkcija LAYER 2:
 
-    - prolazi kroz TICKET_SETS_CONFIG (10 setova)
+    - prolazi kroz TICKET_SETS_CONFIG (12 setova)
     - za svaki set pokreće relevantne buildere
-    - sklapa tikete 3→2→1 (fallback) sa target kvotom 2–3
+    - sklapa tikete 3→2→1 (fallback) sa target kvotom 2–3 (ili malo šire za MIX setove)
     """
     today = date.today().isoformat()
     generated_at = datetime.utcnow().isoformat() + "Z"
@@ -405,62 +385,3 @@ def build_all_ticket_sets(
         "generated_at": generated_at,
         "sets": sets_out,
     }
-
-def collect_legs_for_markets(
-    fixtures: list[dict],
-    odds: list[dict],
-    market_codes: list[str],
-) -> list[dict]:
-    """
-    Iz fixtures + odds flatten liste izvlači legs za zadate markete.
-    Po jednom fixture-u po marketu uzima NAJNIŽU kvotu (konzervativno).
-    """
-    fixtures_by_id = {}
-    for fx in fixtures:
-        fid = fx.get("fixture", {}).get("id") or fx.get("fixture_id")
-        if fid is not None:
-            fixtures_by_id[int(fid)] = fx
-
-    # fixture_id -> market_code -> best_odd
-    best_odds: dict[int, dict[str, float]] = {}
-    for row in odds:
-        m = row.get("market")
-        if m not in market_codes:
-            continue
-        fid = row.get("fixture_id")
-        odd_val = row.get("odd")
-        try:
-            fid = int(fid)
-            odd = float(odd_val)
-        except Exception:
-            continue
-        if odd < 1.05 or odd > 4.00:
-            continue
-        best_odds.setdefault(fid, {})
-        if m not in best_odds[fid] or odd < best_odds[fid][m]:
-            best_odds[fid][m] = odd
-
-    legs: list[dict] = []
-    for fid, markets in best_odds.items():
-        fixture = fixtures_by_id.get(fid)
-        if not fixture:
-            continue
-        if not is_fixture_playable(fixture):
-            continue
-
-        for m_code, odd in markets.items():
-            market_family = MARKET_FAMILY_MAP.get(m_code, m_code)
-            pick_label = PICK_LABEL_MAP.get(m_code, m_code)
-
-            leg = build_leg(
-                fixture,
-                market=m_code,
-                market_family=market_family,
-                pick=pick_label,
-                odds=odd,
-            )
-            if leg:
-                legs.append(leg)
-
-    return legs
-
