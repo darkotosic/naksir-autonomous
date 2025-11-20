@@ -11,6 +11,7 @@ export const Colors = {
   danger: "#ff4b5c",
   warning: "#ffb020",
   divider: "rgba(255, 255, 255, 0.09)",
+  telegram: "#0088cc",
 };
 
 export const layout = {
