@@ -138,13 +138,19 @@ def score_ticket(ticket: Dict[str, Any]) -> float:
 
 
 def annotate_ticket_sets_with_score(ticket_sets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Prolazi kroz sve setove i sve tikete i dodaje 'score' polje bazirano na heurističkom scoringu.
-    """
     for s in ticket_sets or []:
         tickets = s.get("tickets") or []
+        clean_tickets = []
         for t in tickets:
+            if not isinstance(t, dict):
+                # skip invalid ticket
+                continue
+            if not isinstance(t.get("legs"), list):
+                # skip invalid structure
+                continue
             t["score"] = score_ticket(t)
+            clean_tickets.append(t)
+        s["tickets"] = clean_tickets
     return ticket_sets
 
 
