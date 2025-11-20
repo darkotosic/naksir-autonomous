@@ -17,6 +17,7 @@ from core_data.cache import read_json
 from builders.engine import build_all_ticket_sets
 from outputs.pages_writer import write_tickets_json
 from outputs.telegram_bot import send_message
+from ai_engine.meta import annotate_ticket_sets_with_score
 
 
 TELEGRAM_MORNING_CHAT_ID = os.getenv("TELEGRAM_MORNING_CHAT_ID", "").strip()
@@ -123,9 +124,27 @@ def main() -> None:
         print(f"[ERROR] build_all_ticket_sets failed: {e}")
         return
 
+    # 3a) AI scoring meta-layer
+    try:
+        ticket_sets = annotate_ticket_sets_with_score(ticket_sets)
+    except Exception as e:
+        print(f"[WARN] annotate_ticket_sets_with_score failed: {e}")
+
+    # 3b) Filter tickets by minimum score (62%)
+    MIN_SCORE = 62.0
+    filtered_sets = []
+    for s in ticket_sets.get("sets", []):
+        tickets = s.get("tickets", [])
+        kept = [t for t in tickets if float(t.get("score", 0.0) or 0.0) >= MIN_SCORE]
+        if kept:
+            s = dict(s)
+            s["tickets"] = kept
+            filtered_sets.append(s)
+    ticket_sets["sets"] = filtered_sets
+
     sets = ticket_sets.get("sets", [])
     total_tickets = sum(len(s.get("tickets", [])) for s in sets)
-    print(f"[ENGINE] Built {len(sets)} sets, total tickets={total_tickets}")
+    print(f"[ENGINE] Built {len(sets)} sets after AI filter (score >= {MIN_SCORE}), total tickets={total_tickets}")
 
     # 4) Upis tickets.json za frontend / Pages
     try:
