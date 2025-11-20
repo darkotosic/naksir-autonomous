@@ -49,6 +49,8 @@ export default function LandingScreen() {
           <Text style={s.subText}>Join our analysis channel</Text>
         </Pressable>
 
+        <View style={s.spacer} />
+
         <Pressable
           onPress={() => router.push("/tickets")}
           style={({ pressed }) => [s.ctaButton, pressed && s.pressed]}
@@ -169,5 +171,9 @@ const s = StyleSheet.create({
   pressed: {
     transform: [{ scale: 0.99 }],
     opacity: 0.95,
+  },
+  spacer: {
+    flex: 1,
+    minHeight: 40,
   },
 });
