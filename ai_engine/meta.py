@@ -1,10 +1,10 @@
 # ai_engine/meta.py
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Set
 
-# Top / “trusted” lige (tipsterska fora – više verujemo uređenim ligama)
-TOP_LEAGUE_IDS = {
+# Top / “trusted” lige (više verujemo uređenим takmičenjima)
+TOP_LEAGUE_IDS: Set[int] = {
     39,   # England Premier League
     140,  # Spain La Liga
     135,  # Italy Serie A
@@ -14,10 +14,9 @@ TOP_LEAGUE_IDS = {
     203,  # Serbia SuperLiga
 }
 
-# Konzervativna zona kvota za single leg (tipsterska intuicija)
+# Konzervativan raspon kvota po legu
 SAFE_ODDS_MIN = 1.10
 SAFE_ODDS_MAX = 1.40
-
 OPTIMAL_ODDS_LOW = 1.15
 OPTIMAL_ODDS_HIGH = 1.30
 
@@ -26,41 +25,43 @@ def _score_leg(leg: Dict[str, Any]) -> float:
     """
     Heuristički scoring jednog lega.
 
-    Ideja:
     - top lige + stabilne kvote = bonus
     - previše visoke kvote = penal
-    - market diversity i tip tržišta (goals vs 1X2 vs BTTS) može se kasnije dodatno doterivati
+    - goals / BTTS family blago preferirani naspram čistog 1X2
     """
     score = 0.0
 
     league_id = leg.get("league_id")
-    odds = float(leg.get("odds", 0.0) or 0.0)
-    market_family = (leg.get("market_family") or leg.get("market") or "").upper()
+    odds_raw = leg.get("odds", 0.0)
+    try:
+        odds = float(odds_raw or 0.0)
+    except Exception:
+        odds = 0.0
+
+    market_family = str(leg.get("market_family") or leg.get("market") or "").upper()
 
     # 1) Liga
-    if league_id in TOP_LEAGUE_IDS:
-        score += 5.0  # premium ligama dajemo boost
+    if isinstance(league_id, int) and league_id in TOP_LEAGUE_IDS:
+        score += 5.0
     else:
-        score += 2.0  # ostale lige – mali, ali pozitivan doprinos
+        score += 2.0
 
     # 2) Kvote – sweet spot 1.15–1.30
     if odds <= 1.01:
-        score -= 4.0  # praktično beskorisno
+        score -= 4.0
     elif SAFE_ODDS_MIN <= odds <= SAFE_ODDS_MAX:
-        # u okviru konzervativnog raspona
         score += 4.0
         if OPTIMAL_ODDS_LOW <= odds <= OPTIMAL_ODDS_HIGH:
-            score += 3.0  # zlatna zona
+            score += 3.0
         elif odds > OPTIMAL_ODDS_HIGH:
-            score -= 1.0  # bliže 1.40 → malo riskantnije
+            score -= 1.0
     else:
-        # van raspona 1.10–1.40
         if odds < SAFE_ODDS_MIN:
             score -= 2.0
-        else:  # odds > 1.40
+        else:
             score -= 5.0
 
-    # 3) Market family – goals family tipično malo stabilniji od čistih 1X2 na “divljim” ligama
+    # 3) Market family
     if market_family in {"GOALS", "O/U"}:
         score += 1.5
     elif market_family in {"BTTS"}:
@@ -73,32 +74,39 @@ def _score_leg(leg: Dict[str, Any]) -> float:
 
 def score_ticket(ticket: Dict[str, Any]) -> float:
     """
-    Scoring celog tiketa na skali ~50–95.
+    Scoring celog tiketa na skali ~40–95.
 
-    Heuristike:
     - kraći tiket (2–3 meča) = veći score
     - previše mečeva = penal
     - market diversity (mix goals/BTTS/DC/1X2) = plus
-    - top lige / stabilne kvote po legu = veliki deo score-a
+    - top lige / stabilne kvote po legu = glavni signal
     """
-    legs: List[Dict[str, Any]] = ticket.get("legs") or []
-    if not legs:
+    legs = ticket.get("legs") or []
+    if not isinstance(legs, list) or not legs:
         return 0.0
 
-    n_legs = len(legs)
-
-    # 1) Osnovna vrednost
     base = 60.0
 
-    # 2) Doprinos pojedinačnih legova
-    leg_scores = [_score_leg(leg) for leg in legs]
-    avg_leg_score = sum(leg_scores) / max(1, len(leg_scores))
+    leg_scores: List[float] = []
+    for leg in legs:
+        if not isinstance(leg, dict):
+            continue
+        try:
+            leg_scores.append(_score_leg(leg))
+        except Exception:
+            continue
 
+    if not leg_scores:
+        return 40.0
+
+    avg_leg_score = sum(leg_scores) / max(1, len(leg_scores))
     score = base + avg_leg_score
 
-    # 3) Kazna / bonus za dužinu tiketa
+    n_legs = len(leg_scores)
+
+    # dužina tiketa
     if n_legs == 1:
-        score += 3.0  # single je ok, ali naš fokus je na 2–4
+        score += 3.0
     elif n_legs == 2:
         score += 7.0
     elif n_legs == 3:
@@ -108,78 +116,118 @@ def score_ticket(ticket: Dict[str, Any]) -> float:
     elif n_legs == 5:
         score -= 4.0
     else:
-        score -= 6.0  # 6+ legova – tipsterski rizik
+        score -= 6.0
 
-    # 4) Market diversity na nivou tiketa
-    families = set((leg.get("market_family") or leg.get("market") or "").upper() for leg in legs)
+    # market diversity
+    families = set(
+        str(leg.get("market_family") or leg.get("market") or "").upper()
+        for leg in legs
+        if isinstance(leg, dict)
+    )
     families.discard("")
     if len(families) >= 3:
-        score += 5.0  # mix (U3.5 + O1.5 + BTTS) – idealno
+        score += 5.0
     elif len(families) == 2:
         score += 3.0
     else:
-        # monolitni tiket – čist penal
         score -= 4.0
 
-    # 5) Blaga korekcija po ukupnoj kvoti (već obrađena u builderima, ovo je samo finalni fine-tune)
-    total_odds = float(ticket.get("total_odds", 0.0) or 0.0)
+    # blaga korekcija po total odds
+    total_odds_raw = ticket.get("total_odds", 0.0)
+    try:
+        total_odds = float(total_odds_raw or 0.0)
+    except Exception:
+        total_odds = 0.0
+
     if 2.0 <= total_odds <= 3.0:
         score += 2.0
     elif total_odds > 3.0:
         score -= 2.0
 
-    # Clamp na razuman opseg
+    # clamp
     if score < 40.0:
         score = 40.0
     if score > 95.0:
         score = 95.0
 
-    return score
+    return round(score, 1)
 
 
-def annotate_ticket_sets_with_score(ticket_sets: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    for s in ticket_sets or []:
+def annotate_ticket_sets_with_score(ticket_sets: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    ticket_sets je dict oblika:
+      {
+        "sets": [
+          {
+            "code": "...",
+            "label": "...",
+            "tickets": [ { "legs": [...], ... }, ... ]
+          },
+          ...
+        ]
+      }
+
+    Očisti loše tikete (ne-dict, bez legs) i svima ostalima dodaj "score".
+    """
+    sets = ticket_sets.get("sets") or []
+    if not isinstance(sets, list):
+        # ako je neko razbio strukturu, ne radimo ništa
+        return ticket_sets
+
+    new_sets: List[Dict[str, Any]] = []
+
+    for s in sets:
+        if not isinstance(s, dict):
+            continue
         tickets = s.get("tickets") or []
-        clean_tickets = []
+        if not isinstance(tickets, list):
+            continue
+
+        clean_tickets: List[Dict[str, Any]] = []
+
         for t in tickets:
             if not isinstance(t, dict):
-                # skip invalid ticket
                 continue
-            if not isinstance(t.get("legs"), list):
-                # skip invalid structure
+            legs = t.get("legs")
+            if not isinstance(legs, list) or not legs:
                 continue
-            t["score"] = score_ticket(t)
-            clean_tickets.append(t)
+            try:
+                t["score"] = score_ticket(t)
+                clean_tickets.append(t)
+            except Exception:
+                # bilo koji problem u scoringu → preskačemo tiket
+                continue
+
         s["tickets"] = clean_tickets
+        if clean_tickets:
+            new_sets.append(s)
+
+    ticket_sets["sets"] = new_sets
     return ticket_sets
 
 
 def get_adaptive_min_score(fixtures_count: int, raw_total_tickets: int) -> float:
     """
-    Dinamički threshold za AI filter, zasnovan na:
-    - broju današnjih mečeva (fixtures_count)
-    - broju kandidovanih tiketa pre filtera (raw_total_tickets)
+    Dinamički prag za AI filter:
 
-    Tipsterska logika:
-    - kad je malo mečeva / malo kandidata → spuštamo prag (ne forsiramo “savršene” tikete)
-    - kad je bogat dan i ima puno kandidata → dižemo prag (biramo samo crème de la crème)
+    - malo mečeva / malo tiketa → prag pada (ne ubijamo dan)
+    - puno mečeva / puno tiketa → prag raste (biramo samo najbolje)
     """
-    # osnovni prag (ono što si do sada koristio)
     base = 62.0
 
-    # 1) Količina mečeva
+    # 1) količina mečeva
     if fixtures_count <= 40:
-        base -= 6.0         # “mršav” dan – nemamo luksuz da budemo ultra-picki
+        base -= 6.0
     elif fixtures_count <= 80:
         base -= 3.0
     elif fixtures_count >= 200:
-        base += 3.0         # vikendi / puno mečeva – možemo da biramo strože
+        base += 3.0
     elif fixtures_count >= 120:
         base += 1.5
 
-    # 2) Koliko je uopšte kandidovanih tiketa
+    # 2) broj kandidovanih tiketa
     if raw_total_tickets <= 3:
-        base -= 4.0         # ima malo tiketa – bolje da ih ne ubijemo previsokim pragom
+        base -= 4.0
     elif raw_total_tickets <= 6:
         base -= 2.0
     elif raw_total_tickets >= 15:
@@ -187,7 +235,6 @@ def get_adaptive_min_score(fixtures_count: int, raw_total_tickets: int) -> float
     elif raw_total_tickets >= 10:
         base += 1.5
 
-    # Clamp
     if base < 52.0:
         base = 52.0
     if base > 75.0:
