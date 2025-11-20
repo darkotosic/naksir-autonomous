@@ -23,46 +23,84 @@ from ai_engine.meta import annotate_ticket_sets_with_score
 TELEGRAM_MORNING_CHAT_ID = os.getenv("TELEGRAM_MORNING_CHAT_ID", "").strip()
 
 
-def _normalize_items(raw: Any) -> List[Dict[str, Any]]:
-    """
-    Normalizuje fixtures/odds payload na listu dict-ova.
+# -----------------------------
+# Helpers
+# -----------------------------
 
-    Podržava:
-      - već clean-ovane liste
-      - dict sa 'response' listom (legacy API shape)
-      - dict sa 'data' ili 'fixtures' listom (fallback)
+def _normalize_items(raw: Any, label: str) -> List[Dict[str, Any]]:
     """
+    Normalizuje fixtures/odds payload u listu dict-ova.
+    Loguje tip i osnovne informacije da bismo videli problem ako je prazan.
+    """
+    print(f"[DEBUG] Normalizing {label}: type={type(raw).__name__}")
+
     if raw is None:
+        print(f"[WARN] {label} raw is None.")
         return []
 
-    # Već lista
     if isinstance(raw, list):
-        return [x for x in raw if isinstance(x, dict)]
+        items = [x for x in raw if isinstance(x, dict)]
+        print(f"[DEBUG] {label}: list with {len(items)} dict items.")
+        return items
 
     if isinstance(raw, dict):
-        for key in ("response", "fixtures", "data"):
+        # API-FOOTBALL stil: {"response": [...]}
+        if "response" in raw and isinstance(raw["response"], list):
+            items = [x for x in raw["response"] if isinstance(x, dict)]
+            print(f"[DEBUG] {label}: dict with response[{len(items)}].")
+            return items
+
+        # već očišćena lista u nekom polju
+        for key in ("items", "data", "rows"):
             val = raw.get(key)
             if isinstance(val, list):
-                return [x for x in val if isinstance(x, dict)]
+                items = [x for x in val if isinstance(x, dict)]
+                print(f"[DEBUG] {label}: dict with {key}[{len(items)}].")
+                return items
 
-    # Fallback: ništa smisleno
+        # fallback: jedan dict → lista od 1
+        print(f"[DEBUG] {label}: single dict, wrapping into list[1].")
+        return [raw]
+
+    # ako je nešto neočekivano (string itd.)
+    print(f"[WARN] {label}: unsupported raw type={type(raw)}. Returning empty list.")
     return []
 
 
-def _format_ticket_message(ticket_set: Dict[str, Any], ticket: Dict[str, Any]) -> str:
+def _preview_fixtures(fixtures: List[Dict[str, Any]], max_items: int = 5) -> None:
+    print(f"[PREVIEW] Fixtures sample (up to {max_items}):")
+    for i, fx in enumerate(fixtures[:max_items], start=1):
+        league_name = fx.get("league_name") or fx.get("league", {}).get("name", "")
+        league_country = fx.get("league_country") or fx.get("league", {}).get("country", "")
+        home = fx.get("home") or fx.get("teams", {}).get("home", {}).get("name", "")
+        away = fx.get("away") or fx.get("teams", {}).get("away", {}).get("name", "")
+        kickoff = fx.get("kickoff") or fx.get("fixture", {}).get("date", "")
+        print(f"  [{i}] {league_country} {league_name} | {home} vs {away} | {kickoff}")
+
+
+def _preview_odds(odds: List[Dict[str, Any]], max_items: int = 5) -> None:
+    print(f"[PREVIEW] Odds sample (up to {max_items}):")
+    for i, row in enumerate(odds[:max_items], start=1):
+        fixture_id = row.get("fixture_id") or row.get("fixture", {}).get("id")
+        bookmaker = row.get("bookmaker") or row.get("bookmaker_name")
+        market = row.get("market") or row.get("market_name")
+        print(f"  [{i}] fixture_id={fixture_id} | bookmaker={bookmaker} | market={market}")
+
+
+def _format_ticket_message(set_code: str, set_label: str, ticket: Dict[str, Any]) -> str:
     """
-    Formatira jedan tiket u tekst spreman za Telegram.
+    Formatira jedan tiket za Telegram.
     """
-    set_label = ticket_set.get("label") or "[TICKET SET]"
-    set_code = ticket_set.get("code") or "SET"
-    ticket_id = ticket.get("ticket_id") or "?"
+    ticket_id = ticket.get("ticket_id", "N/A")
     total_odds = float(ticket.get("total_odds", 0.0) or 0.0)
+    score = float(ticket.get("score", 0.0) or 0.0)
 
     lines: List[str] = []
     lines.append(f"🎫 {set_label} — Ticket {ticket_id}")
     lines.append(f"📅 {date.today().isoformat()}  |  Set: {set_code}")
     if total_odds > 0:
         lines.append(f"📈 Total odds: {total_odds:.2f}")
+    lines.append(f"🤖 AI score: {score:.1f}%")
     lines.append("")
 
     for leg in ticket.get("legs", []):
@@ -73,49 +111,65 @@ def _format_ticket_message(ticket_set: Dict[str, Any], ticket: Dict[str, Any]) -
         kickoff = leg.get("kickoff") or ""
         market = leg.get("market") or ""
         pick = leg.get("pick") or ""
-        odds = leg.get("odds")
+        odds_val = float(leg.get("odds", 0.0) or 0.0)
 
-        lines.append(f"🏟 {league_name} ({league_country})")
+        lines.append(f"🏟 {league_country} — {league_name}")
         lines.append(f"⚽ {home} vs {away}")
         lines.append(f"⏰ {kickoff}")
-        if odds is not None:
-            lines.append(f"🎯 {market} — {pick} @ {float(odds):.2f}")
-        else:
-            lines.append(f"🎯 {market} — {pick}")
+        lines.append(f"🎯 {market} → {pick} @ {odds_val:.2f}")
         lines.append("")
 
     return "\n".join(lines).strip()
 
 
-def main() -> None:
-    utc_now = datetime.utcnow().isoformat() + "Z"
-    print(f"[{utc_now}] Morning run started")
+# -----------------------------
+# Main pipeline
+# -----------------------------
 
-    # 1) Full ingest (fixtures/odds/standings/stats/h2h...)
+def main() -> None:
+    print("=" * 60)
+    print(f"[{datetime.utcnow().isoformat()}] Morning run START")
+    today = date.today()
+    print(f"[INFO] Today: {today.isoformat()} (cache day)")
+
+    # 1) Ingest svih podataka (LAYER 1)
     try:
         ingest_summary = fetch_all_data(days_ahead=2)
-        print(f"[INGEST] Done. Summary: {json.dumps(ingest_summary, ensure_ascii=False)}")
+        print("[INGEST] fetch_all_data completed.")
+        try:
+            print("[INGEST] Raw summary:")
+            print(json.dumps(ingest_summary, indent=2, ensure_ascii=False)[:2000])
+        except Exception:
+            print("[INGEST] (summary not JSON-serializable)")
     except Exception as e:
         print(f"[ERROR] fetch_all_data failed: {e}")
         return
 
-    # 2) Učitaj današnje fixtures/odds iz cache-a
-    today = date.today()
-    fixtures_raw = read_json("fixtures.json", day=today)
-    odds_raw = read_json("odds.json", day=today)
+    # 2) Učitaj fixtures i odds iz cache-a
+    fixtures_raw = read_json("fixtures.json", today)
+    odds_raw = read_json("odds.json", today)
 
-    fixtures = _normalize_items(fixtures_raw)
-    odds = _normalize_items(odds_raw)
+    if fixtures_raw is None:
+        print("[ERROR] fixtures.json for today not found in cache. Aborting.")
+        return
+    if odds_raw is None:
+        print("[ERROR] odds.json for today not found in cache. Aborting.")
+        return
+
+    fixtures = _normalize_items(fixtures_raw, "fixtures")
+    odds = _normalize_items(odds_raw, "odds")
+
+    print(f"[DATA] Fixtures count={len(fixtures)} | Odds rows count={len(odds)}")
 
     if not fixtures:
-        print("[WARN] No fixtures found for today after normalization. Aborting.")
+        print("[ERROR] No fixtures after normalization. Aborting.")
         return
-
     if not odds:
-        print("[WARN] No odds found for today after normalization. Aborting.")
+        print("[ERROR] No odds after normalization. Aborting.")
         return
 
-    print(f"[DATA] Fixtures={len(fixtures)} | Odds rows={len(odds)}")
+    _preview_fixtures(fixtures)
+    _preview_odds(odds)
 
     # 3) Build all ticket sets (LAYER 2)
     try:
@@ -124,48 +178,81 @@ def main() -> None:
         print(f"[ERROR] build_all_ticket_sets failed: {e}")
         return
 
-    # 3a) AI scoring meta-layer
+    sets = ticket_sets.get("sets", []) or []
+    total_tickets_raw = sum(len(s.get("tickets", [])) for s in sets)
+    print(f"[ENGINE] Raw sets={len(sets)}, raw total tickets={total_tickets_raw}")
+    for s in sets:
+        print(
+            f"[ENGINE] Set {s.get('code')} | status={s.get('status')} | "
+            f"tickets={len(s.get('tickets', []))}"
+        )
+
+    # 3a) AI scoring (LAYER 3)
     try:
         ticket_sets = annotate_ticket_sets_with_score(ticket_sets)
     except Exception as e:
         print(f"[WARN] annotate_ticket_sets_with_score failed: {e}")
 
-    # 3b) Filter tickets by minimum score (62%)
+    # 3b) Filter po AI score >= 62
     MIN_SCORE = 62.0
-    filtered_sets = []
-    for s in ticket_sets.get("sets", []):
+    filtered_sets: List[Dict[str, Any]] = []
+    for s in ticket_sets.get("sets", []) or []:
         tickets = s.get("tickets", [])
-        kept = [t for t in tickets if float(t.get("score", 0.0) or 0.0) >= MIN_SCORE]
+        kept = []
+        for t in tickets:
+            score = float(t.get("score", 0.0) or 0.0)
+            if score >= MIN_SCORE:
+                kept.append(t)
+            else:
+                print(
+                    f"[FILTER] Dropped ticket {t.get('ticket_id')} from set {s.get('code')} "
+                    f"due to low score={score:.1f} (< {MIN_SCORE})"
+                )
         if kept:
-            s = dict(s)
-            s["tickets"] = kept
-            filtered_sets.append(s)
+            s2 = dict(s)
+            s2["tickets"] = kept
+            filtered_sets.append(s2)
+
     ticket_sets["sets"] = filtered_sets
 
-    sets = ticket_sets.get("sets", [])
-    total_tickets = sum(len(s.get("tickets", [])) for s in sets)
-    print(f"[ENGINE] Built {len(sets)} sets after AI filter (score >= {MIN_SCORE}), total tickets={total_tickets}")
+    sets_after = ticket_sets.get("sets", []) or []
+    total_tickets_after = sum(len(s.get("tickets", [])) for s in sets_after)
+    print(
+        f"[ENGINE] After AI filter (score >= {MIN_SCORE}) "
+        f"sets={len(sets_after)}, total tickets={total_tickets_after}"
+    )
+    for s in sets_after:
+        print(
+            f"[ENGINE] Kept set {s.get('code')} | status={s.get('status')} | "
+            f"tickets={len(s.get('tickets', []))}"
+        )
 
-    # 4) Upis tickets.json za frontend / Pages
+    if not sets_after:
+        print("[WARN] No ticket sets left after AI filter. tickets.json will be empty 'sets':[].")
+
+    # 4) Upis tickets.json za frontend / Pages (LAYER 4)
     try:
         write_tickets_json(ticket_sets)
-        print("[OUTPUT] tickets.json written.")
+        print("[OUTPUT] tickets.json written to public/ directory.")
     except Exception as e:
         print(f"[ERROR] write_tickets_json failed: {e}")
 
     # 5) Slanje tiketa na Telegram (ako je podešen chat id)
-    if TELEGRAM_MORNING_CHAT_ID:
-        for s in sets:
+    if TELEGRAM_MORNING_CHAT_ID and sets_after:
+        print(f"[TELEGRAM] Sending tickets to chat={TELEGRAM_MORNING_CHAT_ID}")
+        for s in sets_after:
             status = s.get("status")
             if status and status not in ("OK", "PARTIAL"):
-                # preskoči setove koji su označeni kao NO_DATA / ERROR itd.
+                print(f"[TELEGRAM] Skipping set {s.get('code')} due to status={status}")
                 continue
 
-            for t in s.get("tickets", []):
-                text = _format_ticket_message(s, t)
+            set_code = s.get("code", "N/A")
+            set_label = s.get("label", "N/A")
+            for ticket in s.get("tickets", []):
+                text = _format_ticket_message(set_code, set_label, ticket)
                 print(
-                    f"[TELEGRAM] Sending ticket {t.get('ticket_id')} "
-                    f"({s.get('code')}) to {TELEGRAM_MORNING_CHAT_ID}"
+                    f"[TELEGRAM] Sending ticket {ticket.get('ticket_id')} from set {set_code} "
+                    f"with score={ticket.get('score')}"
                 )
                 try:
                     send_message(
@@ -175,8 +262,14 @@ def main() -> None:
                     )
                 except Exception as e:
                     print(f"[ERROR] Telegram send failed: {e}")
+    else:
+        if not TELEGRAM_MORNING_CHAT_ID:
+            print("[TELEGRAM] TELEGRAM_MORNING_CHAT_ID not set, skipping Telegram step.")
+        if not sets_after:
+            print("[TELEGRAM] No tickets after AI filter, nothing to send.")
 
-    print(f"[{datetime.utcnow().isoformat()}] Morning run done")
+    print(f"[{datetime.utcnow().isoformat()}] Morning run DONE")
+    print("=" * 60)
 
 
 if __name__ == "__main__":
