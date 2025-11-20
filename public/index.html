@@ -7,17 +7,15 @@
   <style>
     :root {
       color-scheme: dark;
-      --bg: #070b16;
-      --panel: rgba(13, 18, 32, 0.9);
-      --border: rgba(148, 163, 184, 0.25);
-      --muted: #cbd5e1;
-      --text: #e2e8f0;
-      --accent: #7c3aed;
-      --accent-2: #06b6d4;
-      --success: #22c55e;
-      --warn: #f97316;
-      --error: #ef4444;
-      --glass: rgba(255, 255, 255, 0.04);
+      --bg: #03060c;
+      --panel: rgba(8, 14, 22, 0.8);
+      --border: rgba(120, 250, 180, 0.28);
+      --text: #e9f5ff;
+      --muted: #b8c4d4;
+      --accent: #48ff7b;
+      --accent-soft: rgba(72, 255, 123, 0.14);
+      --accent-2: #00b5ff;
+      --shadow: 0 25px 50px rgba(0, 0, 0, 0.6);
       font-family: "Inter", "Sora", system-ui, -apple-system, "Segoe UI", sans-serif;
       background: var(--bg);
       color: var(--text);
@@ -30,12 +28,13 @@
     body {
       margin: 0;
       min-height: 100vh;
-      background: radial-gradient(circle at 12% 20%, rgba(124, 58, 237, 0.22), transparent 28%),
-        radial-gradient(circle at 88% 8%, rgba(6, 182, 212, 0.18), transparent 26%),
-        linear-gradient(135deg, rgba(7, 11, 22, 0.95), rgba(4, 7, 18, 0.98));
+      background: radial-gradient(circle at 14% 22%, rgba(72, 255, 123, 0.12), transparent 26%),
+        radial-gradient(circle at 86% 12%, rgba(0, 181, 255, 0.14), transparent 28%),
+        radial-gradient(circle at 20% 82%, rgba(72, 255, 123, 0.08), transparent 22%),
+        linear-gradient(135deg, #050912, #03060c);
       display: flex;
       justify-content: center;
-      padding: 40px 18px 56px;
+      padding: 32px 16px 44px;
       position: relative;
       overflow-x: hidden;
     }
@@ -44,166 +43,269 @@
     body::after {
       content: "";
       position: absolute;
-      filter: blur(80px);
-      opacity: 0.5;
+      inset: 0;
+      pointer-events: none;
+      mix-blend-mode: screen;
+      opacity: 0.45;
+      background: radial-gradient(circle at 30% 10%, rgba(72, 255, 123, 0.14), transparent 30%),
+        radial-gradient(circle at 75% 22%, rgba(0, 181, 255, 0.16), transparent 32%),
+        radial-gradient(circle at 55% 90%, rgba(72, 255, 123, 0.12), transparent 30%);
+      filter: blur(90px);
+      z-index: 0;
+    }
+
+    .page {
+      width: min(1280px, 100%);
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .shell {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: var(--shadow), 0 0 0 1px rgba(72, 255, 123, 0.08);
+      overflow: hidden;
+      position: relative;
+      isolation: isolate;
+    }
+
+    .shell::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(120deg, rgba(72, 255, 123, 0.08), rgba(0, 181, 255, 0.06));
+      opacity: 0.8;
       z-index: 0;
       pointer-events: none;
     }
 
-    body::before {
-      width: 280px;
-      height: 280px;
-      background: rgba(124, 58, 237, 0.35);
-      top: -60px;
-      left: -40px;
-    }
-
-    body::after {
-      width: 320px;
-      height: 320px;
-      background: rgba(6, 182, 212, 0.28);
-      bottom: -80px;
-      right: -60px;
-    }
-
-    .page {
-      width: min(1250px, 100%);
-      display: flex;
-      flex-direction: column;
-      gap: 22px;
+    .content {
       position: relative;
       z-index: 1;
-    }
-
-    .header {
+      padding: 18px 20px;
       display: flex;
       flex-direction: column;
+      gap: 16px;
+    }
+
+    .top-links {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .ghost-link {
+      text-decoration: none;
+      color: var(--text);
+      padding: 12px 14px;
+      text-align: center;
+      border-radius: 14px;
+      border: 1px solid rgba(72, 255, 123, 0.4);
+      background: rgba(72, 255, 123, 0.06);
+      box-shadow: 0 0 18px rgba(72, 255, 123, 0.35);
+      transition: all 0.2s ease;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+    }
+
+    .ghost-link:hover {
+      transform: translateY(-1px) scale(1.01);
+      box-shadow: 0 0 28px rgba(72, 255, 123, 0.45), 0 10px 30px rgba(0, 0, 0, 0.35);
+    }
+
+    .hero {
+      display: grid;
       gap: 12px;
-      background: linear-gradient(120deg, rgba(124, 58, 237, 0.12), rgba(6, 182, 212, 0.1));
-      border: 1px solid rgba(124, 58, 237, 0.35);
-      border-radius: 18px;
-      padding: 18px 20px;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
     }
 
     .eyebrow {
-      letter-spacing: 0.4px;
       text-transform: uppercase;
+      letter-spacing: 0.4px;
       font-weight: 700;
-      color: var(--accent-2);
-      font-size: 0.85rem;
+      color: var(--accent);
       margin: 0;
+      font-size: 0.9rem;
     }
 
     h1 {
       margin: 0;
-      font-size: clamp(1.9rem, 2.4vw + 1rem, 2.4rem);
-      letter-spacing: 0.3px;
+      font-size: clamp(2.1rem, 2vw + 1.2rem, 2.6rem);
+      text-shadow: 0 0 18px rgba(72, 255, 123, 0.45);
     }
 
     .sub {
       color: var(--muted);
       margin: 0;
-      max-width: 900px;
+      max-width: 840px;
       line-height: 1.6;
     }
 
-    .meta-grid {
+    .actions {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 12px;
     }
 
-    .metric {
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
       padding: 14px 16px;
-      border: 1px solid var(--border);
       border-radius: 14px;
-      background: linear-gradient(180deg, rgba(17, 24, 39, 0.9), rgba(11, 17, 32, 0.9));
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      color: #0b1220;
+    }
+
+    .btn.primary {
+      background: linear-gradient(120deg, #48ff7b, #00ffbf);
+      box-shadow: 0 0 24px rgba(72, 255, 123, 0.55), 0 14px 36px rgba(0, 0, 0, 0.45);
+      color: #031408;
+    }
+
+    .btn.primary:hover {
+      transform: translateY(-1px) scale(1.01);
+      box-shadow: 0 0 32px rgba(72, 255, 123, 0.7), 0 18px 40px rgba(0, 0, 0, 0.55);
+    }
+
+    .btn.telegram {
+      background: linear-gradient(120deg, #1f9eff, #42c5ff);
+      color: #031220;
+      border: 1px solid rgba(66, 197, 255, 0.4);
+      box-shadow: 0 0 26px rgba(66, 197, 255, 0.5), 0 16px 32px rgba(0, 0, 0, 0.4);
+    }
+
+    .btn.telegram:hover {
+      transform: translateY(-1px) scale(1.01);
+      box-shadow: 0 0 32px rgba(66, 197, 255, 0.65), 0 20px 38px rgba(0, 0, 0, 0.5);
+    }
+
+    .btn.ghost {
+      background: rgba(72, 255, 123, 0.08);
+      border: 1px solid rgba(72, 255, 123, 0.4);
+      color: var(--text);
+      box-shadow: 0 0 16px rgba(72, 255, 123, 0.3);
+    }
+
+    .btn.ghost:hover {
+      box-shadow: 0 0 20px rgba(72, 255, 123, 0.45), 0 12px 30px rgba(0, 0, 0, 0.45);
+    }
+
+    .btn.xl {
+      padding: 16px 20px;
+      font-size: 1.05rem;
+    }
+
+    .screens {
       position: relative;
-      overflow: hidden;
     }
 
-    .metric::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at 20% 10%, rgba(124, 58, 237, 0.18), transparent 45%);
-      opacity: 0;
-      transition: opacity 0.2s ease;
+    .screen {
+      display: none;
     }
 
-    .metric:hover::after {
-      opacity: 1;
+    .screen.active {
+      display: block;
     }
 
-    .metric h3 {
-      margin: 0 0 4px;
-      font-size: 0.95rem;
-      color: var(--muted);
-      font-weight: 600;
-      letter-spacing: 0.2px;
-    }
-
-    .metric strong {
-      font-size: 1.2rem;
-    }
-
-    .section {
+    .topbar {
       display: flex;
-      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
       gap: 12px;
+      padding: 2px 0 6px;
+    }
+
+    .pill {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(72, 255, 123, 0.35);
+      background: rgba(72, 255, 123, 0.08);
+      color: var(--muted);
+      letter-spacing: 0.2px;
+      box-shadow: 0 0 14px rgba(72, 255, 123, 0.28);
     }
 
     .alert {
       padding: 14px 16px;
       border-radius: 14px;
-      border: 1px solid var(--border);
-      background: var(--glass);
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      backdrop-filter: blur(10px);
-      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(72, 255, 123, 0.35);
+      background: rgba(72, 255, 123, 0.08);
+      color: var(--text);
+      box-shadow: 0 0 20px rgba(72, 255, 123, 0.28);
     }
 
     .alert.error {
-      border-color: rgba(239, 68, 68, 0.5);
-      color: #fecdd3;
-      background: rgba(239, 68, 68, 0.12);
+      border-color: rgba(255, 99, 132, 0.55);
+      background: rgba(255, 99, 132, 0.12);
+      box-shadow: 0 0 20px rgba(255, 99, 132, 0.35);
+      color: #ffe6ee;
     }
 
     .alert.success {
-      border-color: rgba(34, 197, 94, 0.45);
-      color: #bbf7d0;
-      background: rgba(34, 197, 94, 0.12);
+      border-color: rgba(72, 255, 123, 0.6);
+      background: rgba(72, 255, 123, 0.1);
     }
 
+    .meta-grid,
     .status-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+    }
+
+    .metric,
+    .status-card {
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(72, 255, 123, 0.28);
+      background: rgba(6, 10, 16, 0.7);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 16px rgba(72, 255, 123, 0.22);
+    }
+
+    .metric h3,
+    .status-card h3 {
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    .metric strong,
+    .status-card strong {
+      font-size: 1.1rem;
     }
 
     .card {
-      border: 1px solid var(--border);
+      border: 1px solid rgba(72, 255, 123, 0.3);
       border-radius: 16px;
-      padding: 18px;
-      background: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(10, 14, 26, 0.95));
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      padding: 16px;
+      background: linear-gradient(180deg, rgba(8, 14, 22, 0.9), rgba(4, 8, 14, 0.95));
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.45), 0 0 24px rgba(72, 255, 123, 0.2);
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 12px;
       position: relative;
       overflow: hidden;
+      isolation: isolate;
     }
 
     .card::before {
       content: "";
       position: absolute;
       inset: 0;
-      background: radial-gradient(circle at 85% 10%, rgba(6, 182, 212, 0.18), transparent 40%);
+      background: radial-gradient(circle at 82% 10%, rgba(0, 181, 255, 0.12), transparent 45%);
       opacity: 0;
       transition: opacity 0.2s ease;
+      z-index: 0;
     }
 
     .card:hover::before {
@@ -213,7 +315,7 @@
     .card header {
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
       position: relative;
       z-index: 1;
     }
@@ -232,17 +334,17 @@
       gap: 6px;
       padding: 6px 12px;
       border-radius: 999px;
-      font-size: 0.82rem;
-      border: 1px solid var(--border);
-      background: rgba(59, 130, 246, 0.14);
-      color: #bfdbfe;
-      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25);
+      font-size: 0.85rem;
+      border: 1px solid rgba(72, 255, 123, 0.4);
+      background: rgba(72, 255, 123, 0.12);
+      color: var(--text);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.25), 0 0 18px rgba(72, 255, 123, 0.35);
     }
 
-    .badge.ok { border-color: rgba(34, 197, 94, 0.5); color: #bbf7d0; background: rgba(34, 197, 94, 0.12); }
-    .badge.partial { border-color: rgba(249, 115, 22, 0.5); color: #fed7aa; background: rgba(249, 115, 22, 0.12); }
-    .badge.fallback { border-color: rgba(37, 99, 235, 0.5); color: #bfdbfe; background: rgba(37, 99, 235, 0.12); }
-    .badge.error { border-color: rgba(239, 68, 68, 0.5); color: #fecdd3; background: rgba(239, 68, 68, 0.12); }
+    .badge.ok { border-color: rgba(72, 255, 123, 0.5); color: #dcffe9; }
+    .badge.partial { border-color: rgba(255, 198, 88, 0.55); color: #ffe7b4; background: rgba(255, 198, 88, 0.16); }
+    .badge.fallback { border-color: rgba(0, 181, 255, 0.55); color: #d7f2ff; background: rgba(0, 181, 255, 0.18); }
+    .badge.error { border-color: rgba(255, 99, 132, 0.6); color: #ffe6ee; background: rgba(255, 99, 132, 0.18); }
 
     .muted { color: var(--muted); font-size: 0.95rem; }
 
@@ -257,28 +359,27 @@
     .tag {
       padding: 6px 10px;
       border-radius: 10px;
-      background: rgba(148, 163, 184, 0.12);
-      border: 1px solid var(--border);
+      background: rgba(72, 255, 123, 0.08);
+      border: 1px solid rgba(72, 255, 123, 0.28);
       font-size: 0.85rem;
       color: var(--muted);
     }
 
     .ticket-list {
-      display: flex;
-      flex-direction: column;
+      display: grid;
       gap: 10px;
       position: relative;
       z-index: 1;
     }
 
     .ticket {
-      border: 1px solid rgba(148, 163, 184, 0.2);
+      border: 1px solid rgba(72, 255, 123, 0.2);
       border-radius: 12px;
       padding: 12px;
-      background: rgba(124, 58, 237, 0.06);
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
+      background: rgba(72, 255, 123, 0.06);
+      display: grid;
+      gap: 10px;
+      box-shadow: 0 0 18px rgba(72, 255, 123, 0.16);
     }
 
     .ticket header {
@@ -290,51 +391,87 @@
     }
 
     .legs {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
+      display: grid;
+      gap: 8px;
     }
 
     .leg {
-      padding: 8px;
+      padding: 9px 10px;
       border-radius: 10px;
-      border: 1px dashed rgba(148, 163, 184, 0.25);
-      background: rgba(148, 163, 184, 0.04);
+      border: 1px dashed rgba(72, 255, 123, 0.28);
+      background: rgba(8, 14, 22, 0.85);
     }
 
     .leg strong { display: block; }
 
+    .section-title {
+      margin: 0;
+      font-size: 1.1rem;
+      letter-spacing: 0.2px;
+    }
+
     @media (max-width: 720px) {
       body {
-        padding: 22px 14px 40px;
+        padding: 22px 12px 34px;
       }
 
-      .card {
+      .content {
         padding: 16px;
+      }
+
+      .btn.xl {
+        font-size: 1rem;
       }
     }
   </style>
 </head>
 <body>
   <div class="page">
-    <header class="header">
-      <p class="eyebrow">AI Ticket Sets • GitHub Pages artifact</p>
-      <h1>Naksir Autonomous Tickets</h1>
-      <p class="sub">Frontend usklađen sa backend pipeline-om (cron_jobs/morning_run.py → outputs/pages_writer.py).</p>
-      <div id="meta" class="meta-grid"></div>
-    </header>
+    <div class="shell">
+      <div class="content screens">
+        <section id="homeScreen" class="screen active">
+          <nav class="top-links">
+            <a class="ghost-link" href="https://naksirpredictions.top/legal-disclaimer" target="_blank" rel="noreferrer">Legal</a>
+            <a class="ghost-link" href="https://naksirpredictions.top/privacy-policy" target="_blank" rel="noreferrer">Privacy</a>
+            <a class="ghost-link" href="https://naksirpredictions.top/terms-of-use" target="_blank" rel="noreferrer">Terms of Use</a>
+          </nav>
 
-    <section class="section">
-      <div id="alert" class="alert">Loading ticket sets…</div>
-      <div id="statusGrid" class="status-grid"></div>
-    </section>
+          <div class="hero">
+            <p class="eyebrow">Naksir Ultimate</p>
+            <h1>Futuristički neon UI za 2+ tikete</h1>
+            <p class="sub">
+              Pregledaj AI generisane tikete sa remote feed-a. Fudbalska neon zelena tema, tamni mod i outglow za svaki CTA.
+              Klik na dugme ispod da uđeš u Naksir Ultimate 2+ Tickets hub.
+            </p>
+            <div class="actions">
+              <a class="btn telegram xl" href="https://t.me/naksiranalysis" target="_blank" rel="noreferrer">Telegram</a>
+              <button id="openTickets" class="btn primary xl">Cool design · Naksir Ultimate 2+ Tickets</button>
+            </div>
+          </div>
+        </section>
 
-    <section id="cards" class="section"></section>
+        <section id="ticketsScreen" class="screen">
+          <div class="topbar">
+            <button id="backBtn" class="btn ghost">← Back</button>
+            <div class="pill">Ultimate 2+ Tickets · Live neon feed</div>
+          </div>
+
+          <div id="alert" class="alert">Loading ticket sets…</div>
+
+          <div class="meta-grid" id="meta"></div>
+          <div class="status-grid" id="statusGrid"></div>
+
+          <div class="cards" id="cards"></div>
+        </section>
+      </div>
+    </div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
     const safeArray = (v) => (Array.isArray(v) ? v : []);
+    const TICKETS_URL = "https://darkotosic.github.io/naksir-autonomous/tickets.json";
+    let loadedOnce = false;
 
     const STATUS_MAP = {
       OK: { label: "OK", cls: "ok" },
@@ -398,16 +535,14 @@
       grid.innerHTML = "";
 
       const statusCounts =
-        typeof summary.status_counts === "object" && summary.status_counts !== null
-          ? summary.status_counts
-          : {};
+        typeof summary.status_counts === "object" && summary.status_counts !== null ? summary.status_counts : {};
       const keys = Object.keys(statusCounts);
       if (!keys.length) return;
 
       keys.forEach((key) => {
         const value = statusCounts[key];
         const card = document.createElement("div");
-        card.className = "metric";
+        card.className = "status-card";
         card.innerHTML = `<h3>${key}</h3><strong>${value}</strong>`;
         grid.appendChild(card);
       });
@@ -461,7 +596,7 @@
       card.innerHTML = `
         <header>
           <div class="title-row">
-            <h3>${set.label || set.code || "Ticket set"}</h3>
+            <h3 class="section-title">${set.label || set.code || "Ticket set"}</h3>
             ${badge(set.status)}
           </div>
           <div class="muted">Code: ${set.code || "N/A"}</div>
@@ -492,7 +627,7 @@
       renderStatusGrid(summary);
 
       if (!sets.length) {
-        setAlert("error", "Nema dostupnih setova. Pokreni cron_jobs/morning_run.py da generiše tickets.json.");
+        setAlert("error", "Nema dostupnih setova. Proveri GitHub Pages feed.");
         return;
       }
 
@@ -503,19 +638,36 @@
 
     async function loadTickets() {
       try {
-        const res = await fetch("tickets.json", { cache: "no-cache" });
+        setAlert("", "Loading ticket sets…");
+        const res = await fetch(TICKETS_URL, { cache: "no-cache" });
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
         }
         const data = await res.json();
         renderTickets(data);
+        loadedOnce = true;
       } catch (err) {
         console.error(err);
-        setAlert("error", `Neuspešno učitavanje tickets.json (${err.message}). Proveri GitHub Pages artifact.`);
+        setAlert("error", `Neuspešno učitavanje tiketa (${err.message}). Proveri remote tickets.json.`);
       }
     }
 
-    loadTickets();
+    function showScreen(id) {
+      document.querySelectorAll(".screen").forEach((el) => el.classList.remove("active"));
+      const screen = document.getElementById(id);
+      if (screen) screen.classList.add("active");
+    }
+
+    $("openTickets").addEventListener("click", () => {
+      showScreen("ticketsScreen");
+      if (!loadedOnce) {
+        loadTickets();
+      }
+    });
+
+    $("backBtn").addEventListener("click", () => {
+      showScreen("homeScreen");
+    });
   </script>
 </body>
 </html>
