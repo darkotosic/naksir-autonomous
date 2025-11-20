@@ -1,339 +1,227 @@
-from typing import Any, Dict, List, Optional, Union
+# core_data/cleaners.py
+from __future__ import annotations
 
-# Globalni range za "validne" kvote u ingest sloju
-ALLOWED_ODDS_MIN = 1.08
-ALLOWED_ODDS_MAX = 1.45
+from typing import Any, Dict, List, Optional
 
 
-# -----------------------------
-# Helper funkcije
-# -----------------------------
-
-def _as_list(raw: Any) -> List[Any]:
+def _safe_response(raw: Any) -> List[Dict[str, Any]]:
     """
-    API-FOOTBALL obično vraća dict sa 'response' listom.
-    Ovo normalizuje na listu.
+    Helper: vrati listu iz raw API odgovora.
+    API-FOOTBALL standardno vraća dict sa ključem 'response'.
     """
     if raw is None:
         return []
+    if isinstance(raw, dict):
+        resp = raw.get("response")
+        if isinstance(resp, list):
+            return resp
+        if resp is None and isinstance(raw.get("results"), int):
+            # fallback – neki endpointi
+            return []
     if isinstance(raw, list):
         return raw
-    if isinstance(raw, dict):
-        return raw.get("response", []) or []
     return []
 
 
-def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _safe_int(value: Any, default: Optional[int] = None) -> Optional[int]:
-    try:
-        if value is None:
-            return default
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-# -----------------------------
+# ---------------------------------------------------------------------------
 # FIXTURES
-# -----------------------------
+# ---------------------------------------------------------------------------
 
 def clean_fixtures(raw: Any) -> List[Dict[str, Any]]:
     """
-    Normalizuje API-FOOTBALL fixtures rezultat na stabilan, trimmed format.
-    Zadržava glavne segmente: fixture, league, teams, goals, score.
-    """
-    fixtures_clean: List[Dict[str, Any]] = []
+    Normalizacija fixtures odgovora.
 
-    for item in _as_list(raw):
+    Cilj:
+    - vrati listu fixture dict-ova u API-FOOTBALL formatu (fixture/league/teams)
+    - isfiltriraj očigledno neupotrebljive (bez ID, bez timova, cancel-ovane)
+    """
+    response = _safe_response(raw)
+    cleaned: List[Dict[str, Any]] = []
+
+    for item in response:
+        if not isinstance(item, dict):
+            continue
+
         fixture = item.get("fixture") or {}
         league = item.get("league") or {}
         teams = item.get("teams") or {}
-        goals = item.get("goals") or {}
-        score = item.get("score") or {}
 
-        # Osnovne validacije
-        fid = _safe_int(fixture.get("id"))
-        lid = _safe_int(league.get("id"))
-        season = _safe_int(league.get("season"))
+        fid = fixture.get("id")
+        lid = league.get("id")
 
-        home = teams.get("home") or {}
-        away = teams.get("away") or {}
-        home_id = _safe_int(home.get("id"))
-        away_id = _safe_int(away.get("id"))
+        home = (teams.get("home") or {}).get("name")
+        away = (teams.get("away") or {}).get("name")
 
-        if not fid or not lid or not home_id or not away_id:
-            # Ako nema osnovne identifikacije, preskačemo fixture
+        # minimalni sanity check
+        if fid is None or lid is None or not home or not away:
             continue
 
-        clean_item = {
-            "fixture": {
-                "id": fid,
-                "referee": fixture.get("referee"),
-                "timezone": fixture.get("timezone"),
-                "date": fixture.get("date"),
-                "timestamp": _safe_int(fixture.get("timestamp")),
-                "periods": fixture.get("periods") or {},
-                "venue": {
-                    "id": _safe_int((fixture.get("venue") or {}).get("id")),
-                    "name": (fixture.get("venue") or {}).get("name"),
-                    "city": (fixture.get("venue") or {}).get("city"),
-                },
-                "status": {
-                    "long": (fixture.get("status") or {}).get("long"),
-                    "short": (fixture.get("status") or {}).get("short"),
-                    "elapsed": _safe_int((fixture.get("status") or {}).get("elapsed")),
-                },
-            },
-            "league": {
-                "id": lid,
-                "name": league.get("name"),
-                "country": league.get("country"),
-                "logo": league.get("logo"),
-                "flag": league.get("flag"),
-                "season": season,
-                "round": league.get("round"),
-            },
-            "teams": {
-                "home": {
-                    "id": home_id,
-                    "name": home.get("name"),
-                    "logo": home.get("logo"),
-                    "winner": home.get("winner"),
-                },
-                "away": {
-                    "id": away_id,
-                    "name": away.get("name"),
-                    "logo": away.get("logo"),
-                    "winner": away.get("winner"),
-                },
-            },
-            "goals": {
-                "home": _safe_int(goals.get("home")),
-                "away": _safe_int(goals.get("away")),
-            },
-            "score": score or {},
-        }
+        status = (fixture.get("status") or {}).get("short")
+        # ignoriši završene / otkazane / prekinute
+        if status in {"FT", "AET", "PEN", "PST", "CANC", "ABD", "AWD", "WO"}:
+            continue
 
-        fixtures_clean.append(clean_item)
+        cleaned.append(item)
 
-    return fixtures_clean
+    return cleaned
 
 
-# -----------------------------
-# ODDS
-# -----------------------------
+# ---------------------------------------------------------------------------
+# ODDS – full improved mapping
+# ---------------------------------------------------------------------------
+
+def _map_market(bet_name: str, label: str) -> Optional[str]:
+    """
+    Mapira (bet_name, label) iz API-FOOTBALL strukture u interni market kod.
+
+    Vraća:
+      - "HOME", "AWAY", "DRAW"
+      - "1X", "X2", "12"
+      - "O05", "O15", "O25", "O35"
+      - "U25", "U35"
+      - "HT_O05"
+      - "BTTS_YES", "BTTS_NO"
+      - ili None ako nas market ne zanima direktno
+    """
+    bn = (bet_name or "").strip().lower()
+    lv = (label or "").strip().lower()
+
+    # 1) Match Winner
+    if bn == "match winner":
+        if lv in {"home", "1"}:
+            return "HOME"
+        if lv in {"away", "2"}:
+            return "AWAY"
+        if lv in {"draw", "x"}:
+            return "DRAW"
+        return None
+
+    # 2) Double Chance
+    if bn == "double chance":
+        # tipična imena u API-FOOTBALL: "1X", "12", "X2"
+        if lv in {"1x", "1 or draw"}:
+            return "1X"
+        if lv in {"x2", "2x", "draw or 2"}:
+            return "X2"
+        if lv in {"12", "1 or 2"}:
+            return "12"
+        return None
+
+    # 3) Goals Over/Under – full time
+    if bn == "goals over/under":
+        # primeri: "Over 0.5", "Under 3.5"
+        parts = lv.split()
+        if len(parts) != 2:
+            return None
+        side, line = parts[0], parts[1]  # npr. "over", "2.5"
+
+        if side == "over":
+            if line == "0.5":
+                return "O05"
+            if line == "1.5":
+                return "O15"
+            if line == "2.5":
+                return "O25"
+            if line == "3.5":
+                return "O35"
+        if side == "under":
+            if line == "2.5":
+                return "U25"
+            if line == "3.5":
+                return "U35"
+        return None
+
+    # 4) Goals Over/Under – 1st half → HT_O05
+    if "1st half" in bn and ("goals over/under" in bn or "goals" in bn):
+        # "Over 0.5", "Under 0.5", itd.
+        parts = lv.split()
+        if len(parts) != 2:
+            return None
+        side, line = parts[0], parts[1]
+        if side == "over" and line == "0.5":
+            return "HT_O05"
+        return None
+
+    # 5) Both Teams To Score
+    if "both teams to score" in bn or "btts" in bn:
+        if lv in {"yes", "y"}:
+            return "BTTS_YES"
+        if lv in {"no", "n"}:
+            return "BTTS_NO"
+        # ponekad value bude "Yes" / "No" sa velikim početnim slovom
+        if lv in {"da"}:  # ako bi negde bilo lokalizovano
+            return "BTTS_YES"
+        if lv in {"ne"}:
+            return "BTTS_NO"
+        return None
+
+    # ostalo za sada ignorišemo
+    return None
+
 
 def clean_odds(raw: Any) -> List[Dict[str, Any]]:
     """
-    Flatten + očisti API-FOOTBALL odds.
-    Vraća listu pojedinačnih kvota sa osnovnim kontekstom.
+    Normalizacija odds odgovora.
 
-    Struktura elementa:
-    {
+    Vraća flatten listu dict-ova:
+      {
         "fixture_id": int,
         "league_id": int,
-        "bookmaker_id": int,
-        "bookmaker_name": str,
-        "bet_id": int,
-        "bet_name": str,
-        "label": str,     # npr. "Home", "Over 2.5", "Yes"
+        "bookmaker": str,
+        "bet_name": str,     # npr. "Goals Over/Under"
+        "label": str,        # npr. "Over 2.5"
+        "market": str | None,# interni market kod: O15, U35, HOME, 1X, HT_O05, BTTS_YES...
         "odd": float,
-        "updated_at": str
-    }
+      }
+
+    Čak i kada market nije prepoznat (market=None), red se čuva – to daje
+    puniji dataset za kasniju analitiku, a builderi koriste samo ono što znaju.
     """
-    odds_clean: List[Dict[str, Any]] = []
+    response = _safe_response(raw)
+    cleaned: List[Dict[str, Any]] = []
 
-    for item in _as_list(raw):
-        fixture = item.get("fixture") or {}
-        league = item.get("league") or {}
-        bookmakers = item.get("bookmakers") or []
-
-        fid = _safe_int(fixture.get("id"))
-        lid = _safe_int(league.get("id"))
-        updated_at = item.get("update")
-
-        if not fid or not lid:
+    for item in response:
+        if not isinstance(item, dict):
             continue
 
-        for bm in bookmakers:
-            bm_id = _safe_int(bm.get("id"))
-            bm_name = bm.get("name") or "Unknown"
-            bets = bm.get("bets") or []
+        fixture = item.get("fixture") or {}
+        league = item.get("league") or {}
 
-            for bet in bets:
-                bet_id = _safe_int(bet.get("id"))
-                bet_name = bet.get("name") or "Unknown bet"
-                values = bet.get("values") or []
+        fixture_id = fixture.get("id")
+        league_id = league.get("id")
 
-                for v in values:
-                    label = v.get("value") or ""   # npr. "Home", "Away", "Over 2.5"
-                    odd_val = _safe_float(v.get("odd"))
+        if fixture_id is None or league_id is None:
+            continue
 
-                    # Filterišemo invalidne ili van-range kvote
-                    if odd_val is None:
+        for bm in item.get("bookmakers") or []:
+            bookmaker_name = (bm.get("name") or "").strip() or "Unknown"
+
+            for bet in bm.get("bets") or []:
+                bet_name = (bet.get("name") or "").strip()
+                if not bet_name:
+                    continue
+
+                for v in bet.get("values") or []:
+                    label = (v.get("value") or "").strip()
+                    odd_str = v.get("odd")
+
+                    try:
+                        odd_val = float(odd_str)
+                    except (TypeError, ValueError):
                         continue
-                    if odd_val < ALLOWED_ODDS_MIN or odd_val > ALLOWED_ODDS_MAX:
-                        # I dalje možemo da ih sačuvamo za debug ako želiš,
-                        # ali za core sistem filtriramo out-of-range
-                        continue
 
-                    odds_clean.append(
+                    market = _map_market(bet_name, label)
+
+                    cleaned.append(
                         {
-                            "fixture_id": fid,
-                            "league_id": lid,
-                            "bookmaker_id": bm_id,
-                            "bookmaker_name": bm_name,
-                            "bet_id": bet_id,
+                            "fixture_id": int(fixture_id),
+                            "league_id": int(league_id),
+                            "bookmaker": bookmaker_name,
                             "bet_name": bet_name,
                             "label": label,
+                            "market": market,
                             "odd": odd_val,
-                            "updated_at": updated_at,
                         }
                     )
 
-    return odds_clean
-
-
-# -----------------------------
-# STANDINGS
-# -----------------------------
-
-def clean_standings(raw: Any) -> List[Dict[str, Any]]:
-    """
-    Čisti standings u ravnu listu per-team.
-
-    Struktura:
-    {
-        "league_id": int,
-        "season": int,
-        "team_id": int,
-        "team_name": str,
-        "rank": int,
-        "points": int,
-        "played": int,
-        "win": int,
-        "draw": int,
-        "lose": int,
-        "goals_for": int,
-        "goals_against": int,
-        "goals_diff": int,
-        "form": str
-    }
-    """
-    rows: List[Dict[str, Any]] = []
-
-    for item in _as_list(raw):
-        league = item.get("league") or {}
-        lid = _safe_int(league.get("id"))
-        season = _safe_int(league.get("season"))
-        standings = (league.get("standings") or [])
-
-        # standings je obično lista lista ([[team1, team2,...]])
-        for grp in standings:
-            for row in grp:
-                team = row.get("team") or {}
-                all_stats = row.get("all") or {}
-                goals = all_stats.get("goals") or {}
-
-                team_id = _safe_int(team.get("id"))
-                if not lid or not team_id:
-                    continue
-
-                rows.append(
-                    {
-                        "league_id": lid,
-                        "season": season,
-                        "team_id": team_id,
-                        "team_name": team.get("name"),
-                        "rank": _safe_int(row.get("rank")),
-                        "points": _safe_int(row.get("points")),
-                        "played": _safe_int(all_stats.get("played")),
-                        "win": _safe_int(all_stats.get("win")),
-                        "draw": _safe_int(all_stats.get("draw")),
-                        "lose": _safe_int(all_stats.get("lose")),
-                        "goals_for": _safe_int(goals.get("for")),
-                        "goals_against": _safe_int(goals.get("against")),
-                        "goals_diff": _safe_int(row.get("goalsDiff")),
-                        "form": row.get("form"),
-                    }
-                )
-
-    return rows
-
-
-# -----------------------------
-# TEAM STATS
-# -----------------------------
-
-def clean_team_stats(raw: Any) -> Dict[str, Any]:
-    """
-    Čisti team statistics endpoint u kompaktan format fokusiran na ključne metrike
-    koje su potrebne za AI i buildere.
-
-    Vraća dict:
-    {
-        "team_id": int,
-        "league_id": int,
-        "season": int,
-        "form": str,
-        "fixtures": { ... },
-        "goals": { ... },
-        "shots": { ... },
-        "cards": { ... }
-        ...
-    }
-
-    Napomena: Ostavlja nested strukturu ali filtrira na najbitnije delove.
-    """
-    # API-FOOTBALL vraća jedan objekat u response listi
-    items = _as_list(raw)
-    if not items:
-        return {}
-
-    item = items[0]
-
-    team = item.get("team") or {}
-    league = item.get("league") or {}
-
-    fixtures = item.get("fixtures") or {}
-    goals = item.get("goals") or {}
-    shots = item.get("shots") or {}
-    cards = item.get("cards") or {}
-    lineups = item.get("lineups") or {}
-    form = item.get("form")
-
-    clean_stats = {
-        "team_id": _safe_int(team.get("id")),
-        "team_name": team.get("name"),
-        "league_id": _safe_int(league.get("id")),
-        "league_name": league.get("name"),
-        "season": _safe_int(league.get("season")),
-        "form": form,
-        "fixtures": fixtures,
-        "goals": goals,
-        "shots": shots,
-        "cards": cards,
-        "lineups": lineups,
-    }
-
-    return clean_stats
-
-
-# -----------------------------
-# H2H
-# -----------------------------
-
-def clean_h2h(raw: Any) -> List[Dict[str, Any]]:
-    """
-    H2H endpoint obično vraća listu fixtures-ova (mečeva između dva tima).
-    Ovde jednostavno koristimo clean_fixtures ali ga tretiramo kao H2H set.
-    """
-    return clean_fixtures(raw)
+    return cleaned
