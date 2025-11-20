@@ -405,3 +405,62 @@ def build_all_ticket_sets(
         "generated_at": generated_at,
         "sets": sets_out,
     }
+
+def collect_legs_for_markets(
+    fixtures: list[dict],
+    odds: list[dict],
+    market_codes: list[str],
+) -> list[dict]:
+    """
+    Iz fixtures + odds flatten liste izvlači legs za zadate markete.
+    Po jednom fixture-u po marketu uzima NAJNIŽU kvotu (konzervativno).
+    """
+    fixtures_by_id = {}
+    for fx in fixtures:
+        fid = fx.get("fixture", {}).get("id") or fx.get("fixture_id")
+        if fid is not None:
+            fixtures_by_id[int(fid)] = fx
+
+    # fixture_id -> market_code -> best_odd
+    best_odds: dict[int, dict[str, float]] = {}
+    for row in odds:
+        m = row.get("market")
+        if m not in market_codes:
+            continue
+        fid = row.get("fixture_id")
+        odd_val = row.get("odd")
+        try:
+            fid = int(fid)
+            odd = float(odd_val)
+        except Exception:
+            continue
+        if odd < 1.05 or odd > 4.00:
+            continue
+        best_odds.setdefault(fid, {})
+        if m not in best_odds[fid] or odd < best_odds[fid][m]:
+            best_odds[fid][m] = odd
+
+    legs: list[dict] = []
+    for fid, markets in best_odds.items():
+        fixture = fixtures_by_id.get(fid)
+        if not fixture:
+            continue
+        if not is_fixture_playable(fixture):
+            continue
+
+        for m_code, odd in markets.items():
+            market_family = MARKET_FAMILY_MAP.get(m_code, m_code)
+            pick_label = PICK_LABEL_MAP.get(m_code, m_code)
+
+            leg = build_leg(
+                fixture,
+                market=m_code,
+                market_family=market_family,
+                pick=pick_label,
+                odds=odd,
+            )
+            if leg:
+                legs.append(leg)
+
+    return legs
+
