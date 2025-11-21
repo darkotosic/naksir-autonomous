@@ -17,11 +17,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install requirements
-        working-directory: ./naksir-autonomous
         run: pip install -r requirements.txt
 
       - name: Run Naksir Autonomous Engine
-        working-directory: ./naksir-autonomous
         env:
           API_FOOTBALL_BASE_URL: ${{ secrets.API_FOOTBALL_BASE_URL }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
@@ -29,28 +27,28 @@ jobs:
           TELEGRAM_CHANNELS: ${{ secrets.TELEGRAM_CHANNELS }}
           TELEGRAM_MORNING_CHAT_ID: ${{ secrets.TELEGRAM_MORNING_CHAT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: python -m cron_jobs.morning_run
+        run: |
+          echo "=== Running morning_run.py ==="
+          python -m cron_jobs.morning_run
 
-      # KEY FIX — garantuje da public/ postoji u TAČNOM direktorijumu
+      # Safety net – obavezno postoji public/
       - name: Ensure public folder exists
-        working-directory: ./naksir-autonomous
         run: mkdir -p public
 
-      # KEY FIX — uploadujemo TAČAN path
       - name: Upload public folder as artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./naksir-autonomous/public
+          path: ./public
 
   deploy:
     needs: build
+    runs-on: ubuntu-latest
     permissions:
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
 
     steps:
       - name: Deploy to GitHub Pages
