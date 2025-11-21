@@ -1,29 +1,30 @@
 {
   "expo": {
-    "name": "naksir-ultimate-2plus-tickets",
+    "name": "Naksir Ultimate 2+ Tickets",
     "slug": "naksir-ultimate-2plus-tickets",
+    "scheme": "naksir-ultimate-2plus",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "ios": {
-      "supportsTablet": true
+      "backgroundColor": "#02030A"
     },
     "android": {
+      "package": "top.naksir.ultimate2plus",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "edgeToEdgeEnabled": true
+        "backgroundColor": "#02030A"
+      }
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "0db11a12-596d-4ace-9004-6a7e57706f76"
+      }
     }
   }
 }
