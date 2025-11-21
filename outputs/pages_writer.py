@@ -54,8 +54,10 @@ def write_tickets_json(ticket_sets: Dict[str, Any]) -> None:
     data = {
         "date": ticket_sets.get("date") or date.today().isoformat(),
         "generated_at": ticket_sets.get("generated_at"),
+        "analysis_mode": ticket_sets.get("analysis_mode"),
         "meta": ticket_sets.get("meta"),
         "summary": ticket_sets.get("summary") or _summarize_ticket_sets(ticket_sets),
+        "engine_trace": ticket_sets.get("engine_trace", []),
         "sets": ticket_sets.get("sets", []),
     }
     fp = PUBLIC_DIR / "tickets.json"

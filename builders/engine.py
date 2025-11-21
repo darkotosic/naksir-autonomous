@@ -326,6 +326,7 @@ def _build_legs_for_builders(
     odds: List[Dict[str, Any]],
     builder_codes: List[str],
     max_legs_per_builder: int = 200,
+    family_cap: int = 220,
 ) -> List[Dict[str, Any]]:
     """
     Poziva listu buildera i vraća deduplikovan pool legs.
@@ -339,6 +340,7 @@ def _build_legs_for_builders(
     """
     pool: List[Dict[str, Any]] = []
     seen: Set[Tuple[int, str]] = set()
+    family_counts: Dict[str, int] = {}
 
     print(f"[DBG] === Builder group start: {builder_codes} ===")
 
@@ -369,6 +371,13 @@ def _build_legs_for_builders(
             except Exception:
                 continue
 
+            fam = str(leg.get("market_family") or market or "")
+            if fam:
+                current = family_counts.get(fam, 0)
+                if current >= family_cap:
+                    continue
+                family_counts[fam] = current + 1
+
             key = (fid, market)
             if key in seen:
                 continue
@@ -389,7 +398,10 @@ def _build_legs_for_builders(
 
     pool.sort(key=_pool_key, reverse=True)
 
-    print(f"[DBG] === Builder group done → pool size: {len(pool)} (sorted by EU priority) ===")
+    print(
+        f"[DBG] === Builder group done → pool size: {len(pool)} "
+        f"(sorted by EU priority, family caps={family_counts}) ==="
+    )
     return pool
 
 
@@ -424,7 +436,20 @@ def _build_ticket_set_for_config(
     print(f"\n[DBG] === Build SET {code} ({label}) ===")
 
     builders = config["builders"]
-    legs = _build_legs_for_builders(fixtures, odds, builders)
+    family_cap = int(config.get("family_cap", 220))
+    legs = _build_legs_for_builders(fixtures, odds, builders, family_cap=family_cap)
+
+    if not legs and any(code.startswith("O") for code in builders):
+        fallback_builders = ["HT_O05", "DC_1X", "DC_X2"]
+        print(
+            f"[DBG] SET {code} → no legs, fallback to HT/DC builders: {fallback_builders}"
+        )
+        legs = _build_legs_for_builders(
+            fixtures,
+            odds,
+            fallback_builders,
+            family_cap=family_cap,
+        )
 
     print(f"[DBG] SET {code} → legs in pool before scoring filter: {len(legs)}")
 
@@ -453,6 +478,27 @@ def _build_ticket_set_for_config(
     )
 
     if not tickets:
+        backup_pool = builders + ["HT_O05", "DC_1X", "DC_X2"]
+        print(
+            f"[DBG] SET {code} → mixer empty, retry with backup builders {backup_pool}"
+        )
+        legs = _build_legs_for_builders(
+            fixtures,
+            odds,
+            backup_pool,
+            family_cap=family_cap,
+        )
+        tickets = _mix_legs_into_tickets(
+            legs,
+            target_min=float(config["target_min"]),
+            target_max=float(config["target_max"]),
+            legs_min=int(config["legs_min"]),
+            legs_max=int(config["legs_max"]),
+            max_family_per_ticket=int(config.get("max_family_per_ticket", 2)),
+            max_tickets=int(config.get("max_tickets", 3)),
+        )
+
+    if not tickets:
         print(f"[DBG] SET {code} → mixer produced 0 tickets")
         return {
             "code": code,
@@ -468,6 +514,7 @@ def _build_ticket_set_for_config(
         out_tickets.append(
             {
                 "id": ticket_id,
+                "ticket_id": ticket_id,
                 "code": code,
                 "label": label,
                 "total_odds": float(t["total_odds"]),
@@ -514,19 +561,36 @@ def build_all_ticket_sets(
     print(f"[DBG] Ticket sets to build: {len(ticket_sets_config)}")
 
     sets_out: List[Dict[str, Any]] = []
+    engine_trace: List[Dict[str, Any]] = []
     for cfg in ticket_sets_config:
         try:
-            sets_out.append(_build_ticket_set_for_config(cfg, fixtures, odds))
+            result = _build_ticket_set_for_config(cfg, fixtures, odds)
+            sets_out.append(result)
+            engine_trace.append(
+                {
+                    "set": result.get("code"),
+                    "status": result.get("status"),
+                    "tickets": len(result.get("tickets", [])),
+                    "description": cfg.get("description"),
+                }
+            )
         except Exception as exc:
             code = cfg.get("code", "UNNAMED")
             print(f"[ERR] Failed to build set {code}: {exc}")
-            sets_out.append(
+            error_result = {
+                "code": code,
+                "label": cfg.get("label", code),
+                "description": cfg.get("description", ""),
+                "status": "ERROR",
+                "tickets": [],
+            }
+            sets_out.append(error_result)
+            engine_trace.append(
                 {
-                    "code": code,
-                    "label": cfg.get("label", code),
-                    "description": cfg.get("description", ""),
+                    "set": code,
                     "status": "ERROR",
-                    "tickets": [],
+                    "tickets": 0,
+                    "description": cfg.get("description"),
                 }
             )
 
@@ -536,12 +600,14 @@ def build_all_ticket_sets(
     return {
         "date": today,
         "generated_at": generated_at,
+        "analysis_mode": "autonomous_v2",
+        "engine_trace": engine_trace,
         "sets": sets_out,
     }
 
 
 # ---------------------------------------------------------------------------
-# TICKET SETS CONFIG – 12 setova iz kombinacije buildera
+# TICKET SETS CONFIG – 13 setova iz kombinacije buildera
 # ---------------------------------------------------------------------------
 
 TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
@@ -729,6 +795,24 @@ TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
         "max_family_per_ticket": 2,   # max 2 iz iste family unutar tiketa
         "max_tickets": 3,
         "min_leg_score": 0.0,
+    },
+
+    # S13 – EU Value Heatmap (više setova, prefer EU)
+    {
+        "code": "S13_EU_VALUE_MIX",
+        "label": "[S13] EU Value Heatmap",
+        "description": "Prefer EU lige, goals fallback na HT/DC, povećan broj tiketa.",
+        "builders": [
+            "O25", "O35", "BTTS_YES", "DC_1X", "DC_X2", "HT_O05",
+        ],
+        "target_min": 2.05,
+        "target_max": 3.60,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 2,
+        "max_tickets": 4,
+        "min_leg_score": 0.0,
+        "family_cap": 260,
     },
 ]
 

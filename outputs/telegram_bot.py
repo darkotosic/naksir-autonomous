@@ -1,6 +1,7 @@
 # outputs/telegram_bot.py
 import os
 import logging
+import time
 from typing import Optional, Dict, Any
 
 import httpx
@@ -22,14 +23,24 @@ def send_message(chat_id: str, text: str, parse_mode: str = "Markdown") -> Optio
         "parse_mode": parse_mode,
         "disable_web_page_preview": True,
     }
-    try:
-        with httpx.Client(timeout=15.0) as client:
-            resp = client.post(url, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            if not data.get("ok"):
-                logger.error(f"Telegram error: {data}")
-            return data
-    except Exception as e:
-        logger.exception(f"Error sending Telegram message: {e}")
-        return None
+
+    last_error: Optional[Exception] = None
+    for attempt in range(2):
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                if not data.get("ok"):
+                    logger.error(f"Telegram error: {data}")
+                return data
+        except Exception as e:
+            last_error = e
+            logger.warning(
+                "Telegram send attempt %s failed: %s", attempt + 1, e
+            )
+            time.sleep(2)
+
+    if last_error:
+        logger.error("Telegram send failed after retries: %s", last_error)
+    return None

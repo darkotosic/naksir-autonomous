@@ -3,7 +3,8 @@ name: Naksir Autonomous Daily
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "0 6 * * *" # 06:00 ingest
+    - cron: "1 6 * * *" # 06:01 build/deploy
 
 permissions:
   contents: read
@@ -15,9 +16,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  ingest:
+    name: Ingest data (06:00)
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,8 +28,59 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
       - name: Install requirements
         run: pip install -r requirements.txt
+
+      - name: Run ingest + readiness check
+        env:
+          API_FOOTBALL_BASE_URL: ${{ secrets.API_FOOTBALL_BASE_URL }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: |
+          echo "=== Running core_data.ingest (ingest only) ==="
+          python -m core_data.ingest || echo "ingest script returned non-zero"
+
+      - name: Upload cache snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-cache
+          path: cache
+          if-no-files-found: warn
+
+  build:
+    name: Build tickets + Pages (06:01)
+    needs: ingest
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      - name: Restore ingest cache artifact (fail-safe)
+        uses: actions/download-artifact@v4
+        with:
+          name: daily-cache
+          path: cache
+        continue-on-error: true
 
       - name: Run Naksir Autonomous Engine
         env:
@@ -39,7 +91,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_MORNING_CHAT_ID: ${{ secrets.TELEGRAM_MORNING_CHAT_ID }}
         run: |
-          echo "=== Running morning_run.py ==="
+          echo "=== Running morning_run.py (with fallback cache) ==="
           python -m cron_jobs.morning_run || echo "Error in morning_run.py"
 
       - name: Ensure public directory
@@ -49,6 +101,9 @@ jobs:
         run: |
           echo "=== public/tickets.json ==="
           cat public/tickets.json || echo "tickets.json NOT FOUND"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
