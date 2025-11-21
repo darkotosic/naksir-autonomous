@@ -1,15 +1,16 @@
 name: Naksir Autonomous Daily
 
 on:
+  # ručno pokretanje iz Actions taba
   workflow_dispatch:
+
+  # automatski run svaki dan u 06:00 UTC (~07:00 CET)
   schedule:
     - cron: "0 6 * * *"
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
-    env:
-      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Checkout repository
@@ -35,48 +36,38 @@ jobs:
           echo "=== Running morning_run.py ==="
           python -m cron_jobs.morning_run
 
-      - name: Prepare public folder
+      # Safety net – obavezno postoji public/ i fajlovi u njemu
+      - name: Create and populate public folder
         run: |
           mkdir -p public
-
+          
+          # copy tickets.json ako postoji
           if [ -f outputs/tickets.json ]; then
             cp outputs/tickets.json public/tickets.json
           fi
 
+          # copy evaluation.json ako postoji
           if [ -f outputs/evaluation.json ]; then
             cp outputs/evaluation.json public/evaluation.json
           fi
 
+          # optional: copy metadata
           if [ -f outputs/metadata.json ]; then
             cp outputs/metadata.json public/metadata.json
           fi
 
+          # index.html da Pages ne da 404
           if [ ! -f public/index.html ]; then
             echo "<html><body><h2>Naksir Autonomous</h2><p>Static feed.</p></body></html>" > public/index.html
           fi
 
-      - name: Debug tickets.json
-        run: |
-          echo "=== DEBUG: tickets.json ==="
-          if [ -f public/tickets.json ]; then
-            python - << 'PY'
-import json
-with open("public/tickets.json", "r", encoding="utf-8") as f:
-    data = json.load(f)
-sets = data.get("sets", [])
-tickets = sum(len(s.get("tickets", [])) for s in sets)
-print(f"[DBG] date={data.get('date')} sets={len(sets)} tickets={tickets}")
-PY
-          else
-            echo "[DBG] public/tickets.json MISSING"
-
       - name: Upload public folder as artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: public
+          path: ./public
 
   deploy:
-    needs: build-and-deploy
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       pages: write
