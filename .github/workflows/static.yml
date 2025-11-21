@@ -1,12 +1,9 @@
 name: Naksir Autonomous Daily
 
 on:
-  # ručno pokretanje iz Actions taba
   workflow_dispatch:
-
-  # automatski run svaki dan u 06:00 UTC (~07:00 CET)
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "0 6 * * *"  # 06:00 UTC ≈ 07:00 CET
 
 jobs:
   build:
@@ -24,80 +21,42 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
-      - name: python cron_jobs/morning_run.py
+      - name: Run Naksir Autonomous Engine
         env:
           API_FOOTBALL_BASE_URL: ${{ secrets.API_FOOTBALL_BASE_URL }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHANNELS: ${{ secrets.TELEGRAM_CHANNELS }}
           TELEGRAM_MORNING_CHAT_ID: ${{ secrets.TELEGRAM_MORNING_CHAT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "=== Running morning_run.py ==="
           python -m cron_jobs.morning_run
 
-      # DEBUG 1: šta je backend napravio u outputs/
-      - name: Debug outputs folder
+      - name: DEBUG: outputs listing
         run: |
           echo "=== DEBUG: outputs/ listing ==="
-          if [ -d outputs ]; then
-            ls -R outputs
-          else
-            echo "outputs/ folder ne postoji."
-          fi
+          ls -R outputs || echo "No outputs dir"
 
-      # Kreiranje i punjenje public foldera
-      - name: Create and populate public folder
-        run: |
-          mkdir -p public
-          
-          # copy tickets.json ako postoji
-          if [ -f outputs/tickets.json ]; then
-            cp outputs/tickets.json public/tickets.json
-          fi
+      - name: Ensure public dir exists
+        run: mkdir -p public
 
-          # copy evaluation.json ako postoji
-          if [ -f outputs/evaluation.json ]; then
-            cp outputs/evaluation.json public/evaluation.json
-          fi
-
-          # optional: copy metadata
-          if [ -f outputs/metadata.json ]; then
-            cp outputs/metadata.json public/metadata.json
-          fi
-
-          # index.html da Pages ne da 404
-          if [ ! -f public/index.html ]; then
-            echo "<html><body><h2>Naksir Autonomous</h2><p>Static feed.</p></body></html>" > public/index.html
-          fi
-
-      # DEBUG 2: da li tickets.json postoji u public/ i kratak preview
-      - name: Debug public tickets.json
+      - name: DEBUG: public/tickets.json
         run: |
           echo "=== DEBUG: public/tickets.json ==="
           if [ -f public/tickets.json ]; then
-            echo "--- HEAD (prvih ~40 linija) ---"
-            head -n 40 public/tickets.json || true
+            echo "--- HEAD (prvih ~80 linija) ---"
+            head -n 80 public/tickets.json
           else
-            echo "public/tickets.json ne postoji."
+            echo "public/tickets.json ne postoji"
           fi
 
-      - name: Upload public folder as artifact
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./public
 
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Upload raw pages.zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-pages
+          path: ./public
