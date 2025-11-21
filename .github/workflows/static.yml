@@ -3,7 +3,7 @@ name: Naksir Autonomous Daily
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"  # 06:00 UTC ≈ 07:00 CET
+    - cron: "0 6 * * *"
 
 jobs:
   build:
@@ -32,31 +32,15 @@ jobs:
           echo "=== Running morning_run.py ==="
           python -m cron_jobs.morning_run
 
-      - name: DEBUG: outputs listing
-        run: |
-          echo "=== DEBUG: outputs/ listing ==="
-          ls -R outputs || echo "No outputs dir"
-
       - name: Ensure public dir exists
         run: mkdir -p public
 
-      - name: DEBUG: public/tickets.json
+      - name: Preview tickets.json
         run: |
-          echo "=== DEBUG: public/tickets.json ==="
-          if [ -f public/tickets.json ]; then
-            echo "--- HEAD (prvih ~80 linija) ---"
-            head -n 80 public/tickets.json
-          else
-            echo "public/tickets.json ne postoji"
-          fi
+          echo "=== public/tickets.json ==="
+          [ -f public/tickets.json ] && head -n 80 public/tickets.json || echo "Not found"
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./public
-
-      - name: Upload raw pages.zip artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: github-pages
           path: ./public
