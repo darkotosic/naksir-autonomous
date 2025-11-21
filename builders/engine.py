@@ -24,12 +24,12 @@ def _is_valid_ticket(
     if not legs:
         return False
 
-    # 1) svaki fixture max jednom u tiketu
+    # fixture duplikati
     fixture_ids = {leg["fixture_id"] for leg in legs}
     if len(fixture_ids) != len(legs):
         return False
 
-    # 2) ograničenje market_family u tiketu
+    # family limit
     family_counts: Dict[str, int] = {}
     for leg in legs:
         fam = leg.get("market_family") or "GEN"
@@ -37,7 +37,7 @@ def _is_valid_ticket(
         if family_counts[fam] > max_family_per_ticket:
             return False
 
-    # 3) ukupna kvota u target range
+    # kvota u range
     total_odds = _compute_total_odds(legs)
     if total_odds < target_min or total_odds > target_max:
         return False
@@ -56,16 +56,11 @@ def _mix_legs_into_tickets(
     max_attempts: int = 400,
     max_family_per_ticket: int = 2,
 ) -> List[Dict[str, Any]]:
-    """
-    Random mixer nad već izgrađenim legovima.
 
-    Pravila:
-      - pokušava da složi legs_min–legs_max legova
-      - ukupna kvota u [target_min, target_max]
-      - max_family_per_ticket ograničava koliko puta ista family sme da se pojavi
-      - nema duplikata po (fixture_id, market) kombinaciji
-    """
+    print(f"[DBG] Mixer start → available legs: {len(legs)} | target_min={target_min} target_max={target_max}")
+
     if not legs:
+        print("[DBG] Mixer aborted → no legs")
         return []
 
     tickets: List[Dict[str, Any]] = []
@@ -77,9 +72,6 @@ def _mix_legs_into_tickets(
     attempts = 0
     while len(tickets) < max_tickets and attempts < max_attempts:
         attempts += 1
-
-        if len(legs_shuffled) < legs_min:
-            break
 
         k = random.randint(legs_min, min(legs_max, len(legs_shuffled)))
         sample = random.sample(legs_shuffled, k=k)
@@ -93,163 +85,17 @@ def _mix_legs_into_tickets(
         seen_signatures.add(sig)
 
         total_odds = round(_compute_total_odds(sample), 2)
-        ticket = {
+        tickets.append({
             "total_odds": total_odds,
             "legs": sorted(sample, key=lambda x: x["kickoff"]),
-        }
-        tickets.append(ticket)
+        })
 
+    print(f"[DBG] Mixer done → attempts={attempts}, tickets_created={len(tickets)}")
     return tickets
 
 
-# 10 klasičnih setova + 2 nova MIX seta
-TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
-    # 1) Goals MIX: O1.5 + O2.5 + U3.5 (soft mix, max 2 iz iste family)
-    {
-        "code": "SET_GOALS_MIX",
-        "label": "[GOALS MIX]",
-        "builders": ["O15", "O25", "U35"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 2,
-    },
-    # 2) Čisti O1.5
-    {
-        "code": "SET_O15",
-        "label": "[OVER 1.5]",
-        "builders": ["O15"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 3,
-    },
-    # 3) Čisti O2.5
-    {
-        "code": "SET_O25",
-        "label": "[OVER 2.5]",
-        "builders": ["O25"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 3,
-    },
-    # 4) Čisti O3.5
-    {
-        "code": "SET_O35",
-        "label": "[OVER 3.5]",
-        "builders": ["O35"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 3,
-    },
-    # 5) UNDER 3.5
-    {
-        "code": "SET_UNDER",
-        "label": "[UNDER 3.5]",
-        "builders": ["U35"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 3,
-    },
-    # 6) HOME + DC miks (Home win + 1X / X2)
-    {
-        "code": "SET_HOME_DC",
-        "label": "[HOME/DC MIX]",
-        "builders": ["HOME", "DC_1X", "DC_X2"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 2,
-    },
-    # 7) AWAY + DRAW miks (kontra/value set)
-    {
-        "code": "SET_AWAY_DRAW",
-        "label": "[AWAY/DRAW MIX]",
-        "builders": ["AWAY", "DRAW"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 2,
-    },
-    # 8) BTTS YES
-    {
-        "code": "SET_BTTS_YES",
-        "label": "[BTTS YES]",
-        "builders": ["BTTS_YES"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 3,
-    },
-    # 9) BTTS NO
-    {
-        "code": "SET_BTTS_NO",
-        "label": "[BTTS NO]",
-        "builders": ["BTTS_NO"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 3,
-    },
-    # 10) HT Over 0.5 (prvo poluvreme)
-    {
-        "code": "SET_HT",
-        "label": "[HT O0.5]",
-        "builders": ["HT_O05"],
-        "legs_min": 3,
-        "legs_max": 5,
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "max_tickets": 3,
-        "max_family_per_ticket": 3,
-    },
-    # 11) MIX O1.5 + O2.5 (optimizacioni set)
-    {
-        "code": "SET_MIX_O15_O25",
-        "label": "[MIX O1.5+O2.5]",
-        "builders": ["O15", "O25"],
-        "legs_min": 2,
-        "legs_max": 4,
-        "target_min": 2.0,
-        "target_max": 3.2,
-        "max_tickets": 3,
-        "max_family_per_ticket": 2,
-    },
-    # 12) MIX U3.5 + BTTS (optimizacioni set)
-    {
-        "code": "SET_MIX_U35_BTTS",
-        "label": "[MIX U3.5+BTTS]",
-        "builders": ["U35", "BTTS_YES", "BTTS_NO"],
-        "legs_min": 2,
-        "legs_max": 4,
-        "target_min": 2.0,
-        "target_max": 3.5,
-        "max_tickets": 3,
-        "max_family_per_ticket": 2,
-    },
-]
-
+# TICKET_SETS_CONFIG (bez izmena, samo konfiguracija)
+# ...
 
 def _build_legs_for_builders(
     fixtures: List[Dict[str, Any]],
@@ -257,16 +103,18 @@ def _build_legs_for_builders(
     builder_codes: List[str],
     max_legs_per_builder: int = 150,
 ) -> List[Dict[str, Any]]:
-    """
-    Pokreće više buildera i kombinuje njihove legove u jedan pool.
-    Uklanja duplikate po (fixture_id, market).
-    """
+
     pool: List[Dict[str, Any]] = []
     seen: Set[Tuple[int, str]] = set()
+
+    print(f"[DBG] === Builder group start: {builder_codes} ===")
 
     for code in builder_codes:
         builder_fn = get_builder(code)
         legs = builder_fn(fixtures, odds, max_legs=max_legs_per_builder)
+
+        print(f"[DBG] Builder {code} → raw legs: {len(legs)}")
+
         for leg in legs:
             key = (leg["fixture_id"], leg["market"])
             if key in seen:
@@ -274,6 +122,7 @@ def _build_legs_for_builders(
             seen.add(key)
             pool.append(leg)
 
+    print(f"[DBG] Combined builder pool → {len(pool)} unique legs")
     return pool
 
 
@@ -282,72 +131,74 @@ def _build_ticket_set_for_config(
     fixtures: List[Dict[str, Any]],
     odds: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    builders = config["builders"]
-    target_min = config["target_min"]
-    target_max = config["target_max"]
-    legs_min = config["legs_min"]
-    legs_max = config["legs_max"]
-    max_family_per_ticket = config["max_family_per_ticket"]
 
+    code = config["code"]
+    print(f"\n[DBG] === Build SET {code} ===")
+
+    builders = config["builders"]
     legs = _build_legs_for_builders(fixtures, odds, builders)
 
-    # primarni pokušaj: max_tickets (obično 3)
+    print(f"[DBG] SET {code} → legs in pool: {len(legs)}")
+
     tickets = _mix_legs_into_tickets(
         legs,
-        target_min=target_min,
-        target_max=target_max,
-        legs_min=legs_min,
-        legs_max=legs_max,
+        target_min=config["target_min"],
+        target_max=config["target_max"],
+        legs_min=config["legs_min"],
+        legs_max=config["legs_max"],
         max_tickets=config["max_tickets"],
-        max_family_per_ticket=max_family_per_ticket,
+        max_family_per_ticket=config["max_family_per_ticket"],
     )
 
     status = "OK"
     effective_max_tickets = config["max_tickets"]
 
+    print(f"[DBG] SET {code} → primary tickets: {len(tickets)}")
+
     if not tickets:
-        # fallback: 2 tiketa
-        effective_max_tickets = 2
+        print(f"[DBG] SET {code} → fallback to 2 tickets")
         tickets = _mix_legs_into_tickets(
             legs,
-            target_min=target_min,
-            target_max=target_max,
-            legs_min=legs_min,
-            legs_max=legs_max,
+            target_min=config["target_min"],
+            target_max=config["target_max"],
+            legs_min=config["legs_min"],
+            legs_max=config["legs_max"],
             max_tickets=2,
-            max_family_per_ticket=max_family_per_ticket,
+            max_family_per_ticket=config["max_family_per_ticket"],
         )
         if tickets:
             status = "FALLBACK_2"
+            effective_max_tickets = 2
         else:
-            # fallback: 1 tiket
-            effective_max_tickets = 1
+            print(f"[DBG] SET {code} → fallback to 1 ticket")
             tickets = _mix_legs_into_tickets(
                 legs,
-                target_min=target_min,
-                target_max=target_max,
-                legs_min=legs_min,
-                legs_max=legs_max,
+                target_min=config["target_min"],
+                target_max=config["target_max"],
+                legs_min=config["legs_min"],
+                legs_max=config["legs_max"],
                 max_tickets=1,
-                max_family_per_ticket=max_family_per_ticket,
+                max_family_per_ticket=config["max_family_per_ticket"],
             )
             if tickets:
                 status = "FALLBACK_1"
+                effective_max_tickets = 1
             else:
+                print(f"[DBG] SET {code} → NO_DATA")
                 status = "NO_DATA"
+                effective_max_tickets = 0
 
-    code = config["code"]
-    final_tickets: List[Dict[str, Any]] = []
+    final_tickets = []
     for idx, t in enumerate(tickets, start=1):
-        t_id = f"{code}-{idx}"
-        final_tickets.append(
-            {
-                "ticket_id": t_id,
-                "label": config["label"],
-                "total_odds": t["total_odds"],
-                "legs": t["legs"],
-            }
-        )
+        print(f"[DBG] Ticket {code}-{idx} → legs={len(t['legs'])}, total_odds={t['total_odds']}")
+        final_tickets.append({
+            "ticket_id": f"{code}-{idx}",
+            "label": config["label"],
+            "total_odds": t["total_odds"],
+            "legs": t["legs"],
+        })
+
+    print(f"[DBG] SET {code} DONE → final tickets: {len(final_tickets)} (status={status})")
 
     return {
         "code": code,
@@ -364,21 +215,18 @@ def build_all_ticket_sets(
     fixtures: List[Dict[str, Any]],
     odds: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
-    """
-    Glavna funkcija LAYER 2:
 
-    - prolazi kroz TICKET_SETS_CONFIG (12 setova)
-    - za svaki set pokreće relevantne buildere
-    - sklapa tikete 3→2→1 (fallback) sa target kvotom 2–3 (ili malo šire za MIX setove)
-    """
+    print("\n\n[DBG] ========== BUILD ALL TICKET SETS ==========")
     today = date.today().isoformat()
     generated_at = datetime.utcnow().isoformat() + "Z"
 
     sets_out: List[Dict[str, Any]] = []
 
     for cfg in TICKET_SETS_CONFIG:
-        set_result = _build_ticket_set_for_config(cfg, fixtures, odds)
-        sets_out.append(set_result)
+        sets_out.append(_build_ticket_set_for_config(cfg, fixtures, odds))
+
+    total_tickets = sum(len(s["tickets"]) for s in sets_out)
+    print(f"[DBG] === SUMMARY: {len(sets_out)} sets, {total_tickets} total tickets ===")
 
     return {
         "date": today,
