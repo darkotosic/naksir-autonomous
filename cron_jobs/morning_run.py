@@ -263,9 +263,19 @@ def main() -> None:
     except Exception as e:
         print(f"[ERROR] write_tickets_json failed: {e}")
 
-    # 5) Slanje tiketa na Telegram (ako je podešen chat id)
+    # 5) Tiketa na Telegram (ako je podešen chat id)
+    #    Šaljemo samo TOP 2 tiketa po AI score-u preko svih setova.
     if TELEGRAM_MORNING_CHAT_ID and sets_after:
-        print(f"[TELEGRAM] Sending tickets to chat={TELEGRAM_MORNING_CHAT_ID}")
+        MAX_TELEGRAM_TICKETS = 2
+
+        print(
+            f"[TELEGRAM] Selecting up to {MAX_TELEGRAM_TICKETS} top-scoring tickets "
+            f"for chat={TELEGRAM_MORNING_CHAT_ID}"
+        )
+
+        candidates = []
+
+        # Skupi sve tikete iz setova sa OK/PARTIAL statusom
         for s in sets_after:
             status = s.get("status")
             if status and status not in ("OK", "PARTIAL"):
@@ -274,11 +284,40 @@ def main() -> None:
 
             set_code = s.get("code", "N/A")
             set_label = s.get("label", "N/A")
+
             for ticket in s.get("tickets", []):
+                raw_score = ticket.get("score")
+                try:
+                    score_val = float(raw_score) if raw_score is not None else 0.0
+                except (TypeError, ValueError):
+                    score_val = 0.0
+
+                candidates.append(
+                    {
+                        "score": score_val,
+                        "set_code": set_code,
+                        "set_label": set_label,
+                        "ticket": ticket,
+                    }
+                )
+
+        if not candidates:
+            print("[TELEGRAM] No eligible tickets for Telegram after filtering.")
+        else:
+            # Sortiraj po score silazno i uzmi samo prva 2
+            candidates.sort(key=lambda x: x["score"], reverse=True)
+            selected = candidates[:MAX_TELEGRAM_TICKETS]
+
+            for rank, item in enumerate(selected, start=1):
+                ticket = item["ticket"]
+                set_code = item["set_code"]
+                set_label = item["set_label"]
+                score_val = item["score"]
+
                 text = _format_ticket_message(set_code, set_label, ticket)
                 print(
-                    f"[TELEGRAM] Sending ticket {ticket.get('ticket_id')} from set {set_code} "
-                    f"with score={ticket.get('score')}"
+                    f"[TELEGRAM] Sending TOP#{rank} ticket {ticket.get('ticket_id')} "
+                    f"from set {set_code} with score={score_val:.1f}"
                 )
                 try:
                     send_message(
@@ -293,10 +332,3 @@ def main() -> None:
             print("[TELEGRAM] TELEGRAM_MORNING_CHAT_ID not set, skipping Telegram step.")
         if not sets_after:
             print("[TELEGRAM] No tickets after AI filter, nothing to send.")
-
-    print(f"[{datetime.utcnow().isoformat()}] Morning run DONE")
-    print("=" * 60)
-
-
-if __name__ == "__main__":
-    main()
