@@ -21,6 +21,8 @@ from ai_engine.meta import (
     annotate_ticket_sets_with_score,
     get_adaptive_min_score,
 )
+# NOVO: in-depth AI analiza po legu
+from ai_engine.in_depth import attach_in_depth_analysis
 
 TELEGRAM_MORNING_CHAT_ID = os.getenv("TELEGRAM_MORNING_CHAT_ID", "").strip()
 
@@ -147,9 +149,10 @@ def main() -> None:
         print(f"[ERROR] fetch_all_data failed: {e}")
         return
 
-    # 2) Učitaj fixtures i odds iz cache-a
+    # 2) Učitaj fixtures, odds i all_data iz cache-a
     fixtures_raw = read_json("fixtures.json", today)
     odds_raw = read_json("odds.json", today)
+    all_data_raw = read_json("all_data.json", today)
 
     if fixtures_raw is None:
         print("[ERROR] fixtures.json for today not found in cache. Aborting.")
@@ -157,6 +160,13 @@ def main() -> None:
     if odds_raw is None:
         print("[ERROR] odds.json for today not found in cache. Aborting.")
         return
+    if all_data_raw is None:
+        print("[WARN] all_data.json for today not found in cache. In-depth analysis will be skipped.")
+        all_data: Dict[str, Any] = {}
+    else:
+        all_data = all_data_raw if isinstance(all_data_raw, dict) else {}
+        if not all_data:
+            print("[WARN] all_data.json is not a dict. In-depth analysis will be skipped.")
 
     fixtures = _normalize_items(fixtures_raw, "fixtures")
     odds = _normalize_items(odds_raw, "odds")
@@ -195,7 +205,17 @@ def main() -> None:
     except Exception as e:
         print(f"[WARN] annotate_ticket_sets_with_score failed: {e}")
 
-    # 3b) Adaptivni AI filter
+    # 3b) In-depth AI analiza po svakom legu (LAYER 3b)
+    if all_data:
+        try:
+            ticket_sets = attach_in_depth_analysis(ticket_sets, all_data)
+            print("[AI] In-depth analysis attached to legs.")
+        except Exception as e:
+            print(f"[WARN] attach_in_depth_analysis failed: {e}")
+    else:
+        print("[AI] Skipping in-depth analysis (no all_data available).")
+
+    # 3c) Adaptivni AI filter
     fixtures_count = len(fixtures)
     MIN_SCORE = get_adaptive_min_score(
         fixtures_count=fixtures_count,
