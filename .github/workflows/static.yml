@@ -32,8 +32,29 @@ jobs:
           python -m cron_jobs.morning_run
 
       # Safety net – obavezno postoji public/
-      - name: Ensure public folder exists
-        run: mkdir -p public
+      - name: Create and populate public folder
+        run: |
+          mkdir -p public
+          
+          # copy tickets.json ako postoji
+          if [ -f outputs/tickets.json ]; then
+            cp outputs/tickets.json public/tickets.json
+          fi
+
+          # copy evaluation.json ako postoji
+          if [ -f outputs/evaluation.json ]; then
+            cp outputs/evaluation.json public/evaluation.json
+          fi
+
+          # optional: copy metadata
+          if [ -f outputs/metadata.json ]; then
+            cp outputs/metadata.json public/metadata.json
+          fi
+
+          # mora postojati index.html da Pages ne da 404
+          if [ ! -f public/index.html ]; then
+            echo "<html><body><h2>Naksir Autonomous</h2><p>Static feed.</p></body></html>" > public/index.html
+          fi
 
       - name: Upload public folder as artifact
         uses: actions/upload-pages-artifact@v3
