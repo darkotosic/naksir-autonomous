@@ -8,10 +8,6 @@ on:
   schedule:
     - cron: "0 6 * * *"
 
-concurrency:
-  group: naksir-autonomous-daily
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -21,15 +17,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      # Cache za pip da build bude brži
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -51,8 +38,9 @@ jobs:
           echo "=== Running morning_run.py ==="
           python -m cron_jobs.morning_run
 
-      # Debug: šta je engine izbacio u outputs/
+      # DEBUG: šta je engine izbacio u outputs/
       - name: Debug outputs folder
+        if: always()
         run: |
           echo "=== DEBUG: outputs/ listing ==="
           if [ -d outputs ]; then
@@ -86,8 +74,9 @@ jobs:
             echo "<html><body><h2>Naksir Autonomous</h2><p>Static feed.</p></body></html>" > public/index.html
           fi
 
-      # Debug: sumarno koliko setova / tiketa imamo u tickets.json
+      # DEBUG: sumarno koliko setova / tiketa imamo u tickets.json
       - name: Debug tickets.json summary
+        if: always()
         run: |
           echo "=== DEBUG: tickets.json summary ==="
           python - << 'PY'
