@@ -24,7 +24,7 @@ jobs:
       - name: Install requirements
         run: pip install -r requirements.txt
 
-      - name: Run Naksir Autonomous Engine
+      - name: python cron_jobs/morning_run.py
         env:
           API_FOOTBALL_BASE_URL: ${{ secrets.API_FOOTBALL_BASE_URL }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
