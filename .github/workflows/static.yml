@@ -1,29 +1,71 @@
-name: Naksir Autonomous Daily
+name: Naksir Autonomous Daily Run
 
 on:
-  # ručno pokretanje iz Actions taba
   workflow_dispatch:
-
-  # automatski run svaki dan u 06:00 UTC (~07:00 CET)
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "0 6 * * *"   # 06:00 UTC daily
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
+      # 1. Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Setup Python
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
+      # 3. Install dependencies
       - name: Install requirements
-        run: pip install -r requirements.txt
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
+      # 4. Run autonomous backend pipeline
+      - name: Run Naksir Autonomous Engine
+        env:
+name: Naksir Autonomous Daily Run
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC daily
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Checkout repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Setup Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      # 3. Install dependencies
+      - name: Install requirements
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. Run autonomous backend pipeline
       - name: Run Naksir Autonomous Engine
         env:
           API_FOOTBALL_BASE_URL: ${{ secrets.API_FOOTBALL_BASE_URL }}
@@ -36,42 +78,37 @@ jobs:
           echo "=== Running morning_run.py ==="
           python -m cron_jobs.morning_run
 
-      # Safety net – obavezno postoji public/ i fajlovi u njemu
-      - name: Create and populate public folder
-        run: |
-          mkdir -p public
-          
-          # copy tickets.json ako postoji
-          if [ -f outputs/tickets.json ]; then
-            cp outputs/tickets.json public/tickets.json
-          fi
-
-          # copy evaluation.json ako postoji
-          if [ -f outputs/evaluation.json ]; then
-            cp outputs/evaluation.json public/evaluation.json
-          fi
-
-          # optional: copy metadata
-          if [ -f outputs/metadata.json ]; then
-            cp outputs/metadata.json public/metadata.json
-          fi
-
-          # index.html da Pages ne da 404
-          if [ ! -f public/index.html ]; then
-            echo "<html><body><h2>Naksir Autonomous</h2><p>Static feed.</p></body></html>" > public/index.html
-          fi
-
+      # 5. Prepare artifacts for GitHub Pages
       - name: Upload public folder as artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./public
+          path: public
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+        run: |
+          echo "=== Running morning_run.py ==="
+          python -m cron_jobs.morning_run
+
+      # 5. Prepare artifacts for GitHub Pages
+      - name: Upload public folder as artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
