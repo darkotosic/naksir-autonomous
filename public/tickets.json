@@ -1,39 +1,6 @@
 {
-  "date": "2025-11-21",
-  "sets": [
-    {
-      "code": "SET_GOALS_MIX",
-      "label": "[GOALS MIX]",
-      "status": "OK",
-      "requested_max_tickets": 3,
-      "effective_max_tickets": 3,
-      "tickets": [
-        {
-          "ticket_id": "SET_GOALS_MIX-1",
-          "label": "[GOALS MIX]",
-          "total_odds": 2.32,
-          "score": 77.3,
-          "legs": [
-            {
-              "fixture_id": 123,
-              "league_id": 39,
-              "league_name": "Premier League",
-              "league_country": "England",
-              "home": "Liverpool",
-              "away": "Everton",
-              "kickoff": "2025-11-21T20:00:00+00:00",
-              "market": "U35",
-              "market_family": "GOALS",
-              "pick": "Under 3.5 Goals",
-              "odds": 1.35,
-              "analysis": [
-                "Liverpool je defanzivno stabilan kod kuće i u poslednjih pet utakmica retko ulaze u vrlo efikasne mečeve.",
-                "Everton obično prilazi derbijima oprezno, što dodatno gura verovatnoću ka utakmici sa 0–3 gola."
-              ]
-            }
-          ]
-        }
-      ]
-    }
-  ]
+  "date": "2025-11-20",
+  "generated_at": "2025-11-20T15:33:49.436422Z",
+  "sets": [],
+  "note": "Placeholder tickets.json — will be overwritten by cron_jobs.morning_run."
 }
