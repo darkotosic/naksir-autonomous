@@ -7,102 +7,39 @@ from typing import Any, Dict, List, Tuple, Set, Optional
 
 from .registry import get_builder
 
-# ---------------------------------------------------------------------------
-# Globalna konfiguracija setova tiketa (TICKET_SETS_CONFIG)
-# ---------------------------------------------------------------------------
-# Svaki "set" koristi grupu build-era i pravila:
-#  - builders: šifre iz builders/registry.py (O15, O25, U35, BTTS_YES, HOME, DC_1X, ...)
-#  - target_min/target_max: ukupna kvota po tiketu (npr. 2.0–3.0)
-#  - legs_min/legs_max: broj utakmica u tiketu
-#  - max_family_per_ticket: koliko puta ista market_family može da se pojavi u jednom tiketu
-#  - max_tickets: maksimalan broj tiketa u tom setu
+###############################################################################
+# League priority (EU TOP ligе i takmičenja)
+###############################################################################
 
-TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
-    # 1) Safe goals mix (O1.5 + O2.5 + U3.5)
-    {
-        "code": "S1_GOALS_MIX_SAFE",
-        "label": "[S1] Safe Goals Mix 2+",
-        "description": "Mix O1.5, O2.5 i U3.5 sa limitom na market family (max 2 po tiketu).",
-        "builders": ["O15", "O25", "U35"],
-        "target_min": 2.0,
-        "target_max": 2.8,
-        "legs_min": 3,
-        "legs_max": 5,
-        "max_family_per_ticket": 2,
-        "max_tickets": 3,
-        # min_leg_score ostavljamo na default 0.0, jer builderi trenutno ne pune model_score/confidence
-    },
+EURO_PRIORITY: Dict[int, int] = {
+    # Big 5 ligе
+    39: 100,   # England - Premier League
+    140: 95,   # Spain - La Liga
+    135: 95,   # Italy - Serie A
+    78: 90,    # Germany - Bundesliga
+    61: 85,    # France - Ligue 1
 
-    # 2) Over 1.5 fokus (klasičan “sigurniji” goals tiket)
-    {
-        "code": "S2_OVER_15",
-        "label": "[S2] Over 1.5 2+",
-        "description": "Fokus na Over 1.5, više mečeva u tiketu.",
-        "builders": ["O15"],
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "legs_min": 3,
-        "legs_max": 6,
-        "max_family_per_ticket": 3,  # goals family može i više puta, jer je ovo mono-goals tiket
-        "max_tickets": 3,
-    },
+    # Evropska takmičenja
+    2: 120,    # UEFA Champions League
+    3: 115,    # UEFA Europa League
+    848: 110,  # UEFA Conference League
+    5: 105,    # UEFA Nations League
 
-    # 3) Over 2.5 fokus
-    {
-        "code": "S3_OVER_25",
-        "label": "[S3] Over 2.5 2+",
-        "description": "Agresivniji goals tiket sa Over 2.5 marketom.",
-        "builders": ["O25"],
-        "target_min": 2.0,
-        "target_max": 3.2,
-        "legs_min": 2,
-        "legs_max": 5,
-        "max_family_per_ticket": 3,
-        "max_tickets": 3,
-    },
+    # Jake dodatne ligе
+    88: 80,    # Netherlands - Eredivisie
+    94: 75,    # Portugal - Primeira Liga
+    203: 70,   # Turkey - Super Lig
+    71: 70,    # Belgium - Pro League
+    566: 65,   # Serbia - SuperLiga
+}
 
-    # 4) BTTS fokus (YES/NO)
-    {
-        "code": "S4_BTTS",
-        "label": "[S4] BTTS Focus 2+",
-        "description": "BTTS YES/NO tiket, max 3 meča, čista BTTS family.",
-        "builders": ["BTTS_YES", "BTTS_NO"],
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "legs_min": 2,
-        "legs_max": 3,
-        "max_family_per_ticket": 3,  # sve je BTTS family, nema smisla da gušimo
-        "max_tickets": 3,
-    },
 
-    # 5) Rezultat + Double Chance (HOME, AWAY, 1X, X2)
-    {
-        "code": "S5_RESULT_DC",
-        "label": "[S5] Result & DC 2+",
-        "description": "Mix HOME/AWAY i DC (1X, X2) sa blagim limitom market family.",
-        "builders": ["HOME", "AWAY", "DC_1X", "DC_X2"],
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "legs_min": 2,
-        "legs_max": 4,
-        "max_family_per_ticket": 2,
-        "max_tickets": 3,
-    },
-
-    # 6) HT Over 0.5 – specijal za prvo poluvreme
-    {
-        "code": "S6_HT_OVER_05",
-        "label": "[S6] HT Over 0.5 2+",
-        "description": "Prvo poluvreme goals (HT Over 0.5), do 5 mečeva u tiketu.",
-        "builders": ["HT_O05"],
-        "target_min": 2.0,
-        "target_max": 3.0,
-        "legs_min": 3,
-        "legs_max": 5,
-        "max_family_per_ticket": 3,
-        "max_tickets": 3,
-    },
-]
+def league_priority_from_leg(leg: Dict[str, Any]) -> int:
+    try:
+        lid = int(leg.get("league_id", 0))
+    except Exception:
+        return 1
+    return EURO_PRIORITY.get(lid, 1)
 
 
 ###############################################################################
@@ -112,26 +49,26 @@ TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
 
 def _compute_total_odds(legs: List[Dict[str, Any]]) -> float:
     """
-    Multiplicative accumulator for decimal odds.
-    Expects each leg["odds"] to be castable to float.
+    Multiplikativni akumulator za decimalne kvote.
+    Očekuje leg["odds"] kao float-abilan.
     """
     total = 1.0
     for leg in legs:
         try:
             total *= float(leg["odds"])
         except (KeyError, TypeError, ValueError):
-            # If odds are missing or invalid, treat as fatal for this ticket.
             return 0.0
     return round(total, 4)
 
 
 def _get_leg_score(leg: Dict[str, Any]) -> float:
     """
-    Normalized "quality" score for a leg.
-    Builders are free to attach any of:
+    Normalizovan "quality" score za jedan leg.
+    Podržani ključеvi:
       - model_score: 0–100
       - confidence: 0–100
-    Fallback is 0.0 (lowest priority).
+      - score: 0–100
+    Fallback = 0.0.
     """
     for key in ("model_score", "confidence", "score"):
         val = leg.get(key)
@@ -146,8 +83,7 @@ def _get_leg_score(leg: Dict[str, Any]) -> float:
 
 def _group_legs_by_fixture(legs: List[Dict[str, Any]]) -> Dict[int, List[Dict[str, Any]]]:
     """
-    Utility primarily for debugging / analytics.
-    Not strictly required by mixer logic but handy to have.
+    Utility za debug/analitiku – nije obavezan za mixer, ali koristan.
     """
     grouped: Dict[int, List[Dict[str, Any]]] = {}
     for leg in legs:
@@ -168,22 +104,21 @@ def _is_valid_ticket(
     max_family_per_ticket: int,
 ) -> bool:
     """
-    Applies all ticket-level constraints:
-      - non-empty
-      - no duplicate fixtures
-      - market family cap (only for legs that actually define market_family)
-      - total odds in [target_min, target_max]
+    Validacija tiketa:
+      - ne sme biti prazan
+      - nema duplih fixture-a
+      - limit na market_family (samo ako leg ima market_family)
+      - ukupna kvota u [target_min, target_max]
     """
     if not legs:
         return False
 
-    # 1) No duplicate fixtures inside a single ticket.
+    # 1) Nema duplih fixture-a.
     fixture_ids = [int(leg["fixture_id"]) for leg in legs if "fixture_id" in leg]
     if len(fixture_ids) != len(set(fixture_ids)):
         return False
 
-    # 2) Market family limit – enforced only if builder sets "market_family".
-    #    Ovo sprečava da stari builderi bez market_family ubiju sve tikete.
+    # 2) Market family limit – primeni samo ako builder popunjava "market_family".
     if max_family_per_ticket > 0:
         family_counts: Dict[str, int] = {}
         for leg in legs:
@@ -195,7 +130,7 @@ def _is_valid_ticket(
             if family_counts[fam] > max_family_per_ticket:
                 return False
 
-    # 3) Odds range.
+    # 3) Ukupna kvota.
     total_odds = _compute_total_odds(legs)
     if total_odds <= 0.0:
         return False
@@ -214,19 +149,25 @@ def _build_candidate_ticket(
     used_fixtures: Set[int],
 ) -> Optional[List[Dict[str, Any]]]:
     """
-    Greedy builder:
-      - start from highest-scoring legs
-      - respect:
-          * unique fixture rule
-          * market-family per ticket cap
-      - aim for exactly desired_legs per ticket
-      - final odds must be in [target_min, target_max]
-    Returns:
-      - list of legs if valid ticket can be built
-      - None if no valid combo found
+    Greedy konstruktor jednog tiketa:
+      - startuje od najkvalitetnijih legova (score + EU priority)
+      - poštuje:
+          * unique fixture unutar seta
+          * market_family limit po tiketu
+      - cilja tačno desired_legs
+      - konačna kvota mora biti u [target_min, target_max]
     """
-    # Sort once by descending score (stable – we don't mutate pool itself).
-    sorted_pool = sorted(pool, key=_get_leg_score, reverse=True)
+    # Sortiramo pool:
+    # 1) league priority (desc)
+    # 2) leg score (desc)
+    # 3) kickoff (asc) ako postoji
+    def _sort_key(leg: Dict[str, Any]) -> Tuple[int, float, str]:
+        prio = league_priority_from_leg(leg)
+        score = _get_leg_score(leg)
+        kickoff = str(leg.get("kickoff") or "")
+        return (prio, score, kickoff)
+
+    sorted_pool = sorted(pool, key=_sort_key, reverse=True)
 
     ticket_legs: List[Dict[str, Any]] = []
     ticket_fixture_ids: Set[int] = set()
@@ -241,15 +182,15 @@ def _build_candidate_ticket(
         except Exception:
             continue
 
-        # Do not reuse fixtures that are already in other tickets in this set.
+        # Ne koristimo fixture koji je već u nekom tiketu ovog seta.
         if fid in used_fixtures:
             continue
 
-        # Do not duplicate fixture inside the same ticket.
+        # Ne dupliramo fixture unutar istog tiketa.
         if fid in ticket_fixture_ids:
             continue
 
-        # Market family rule within ticket.
+        # Market family limit unutar tiketa.
         fam = leg.get("market_family")
         if fam and max_family_per_ticket > 0:
             fam = str(fam)
@@ -257,13 +198,11 @@ def _build_candidate_ticket(
             if current + 1 > max_family_per_ticket:
                 continue
 
-        # Temporarily add leg and check odds only when we have full size.
         ticket_legs.append(leg)
         ticket_fixture_ids.add(fid)
         if fam:
             family_counts[fam] = family_counts.get(fam, 0) + 1
 
-    # Validate size & odds.
     if len(ticket_legs) != desired_legs:
         return None
 
@@ -284,15 +223,14 @@ def _mix_legs_into_tickets(
     max_tickets: int,
 ) -> List[Dict[str, Any]]:
     """
-    Core mixer engine for one ticket set.
+    Core mixer za jedan ticket set.
 
-    Strategy:
-      1) Filter & sort legs by score (desc).
-      2) Try to build tickets with legs_max first.
-      3) Ako nema dovoljno, fallback na legs_max-1, ..., legs_min.
-      4) Legs se ne ponavljaju unutar istog seta (fixture unique per set).
+    Strategija:
+      1) Čistimo legs (validne kvote).
+      2) Pokušavamo da pravimo tikete sa legs_max nogu.
+      3) Ako nema dovoljno → fallback na legs_max-1, ..., legs_min.
+      4) Fixture se ne ponavlja unutar istog seta (hard rule).
     """
-    # Defensive bounds.
     if legs_min < 1:
         legs_min = 1
     if legs_max < legs_min:
@@ -300,7 +238,7 @@ def _mix_legs_into_tickets(
     if max_tickets < 1:
         return []
 
-    # Clean legs: remove ones bez odds.
+    # Filter legs bez validnih kvota.
     clean_legs: List[Dict[str, Any]] = []
     for leg in legs:
         try:
@@ -315,17 +253,14 @@ def _mix_legs_into_tickets(
         print("[DBG] Mixer: no valid legs after cleaning.")
         return []
 
-    # Used fixtures across tickets in this set – hard rule: 1 fixture per set.
     used_fixtures: Set[int] = set()
     tickets: List[Dict[str, Any]] = []
 
-    # Fallback legs flow: n = legs_max ... legs_min
     for desired_legs in range(legs_max, legs_min - 1, -1):
         if len(tickets) >= max_tickets:
             break
 
         attempts = 0
-        # Hard cap on attempts per leg-size to avoid infinite loops.
         max_attempts = len(clean_legs) * 3
 
         while len(tickets) < max_tickets and attempts < max_attempts:
@@ -341,23 +276,28 @@ def _mix_legs_into_tickets(
             )
 
             if not ticket_legs:
-                break  # nothing more we can build for this desired_legs
+                break
 
-            # Register used fixtures to keep tickets disjoint by fixture.
             for leg in ticket_legs:
                 try:
                     used_fixtures.add(int(leg["fixture_id"]))
                 except Exception:
                     continue
 
+            # Osnovni AI score = prosečni leg score.
+            base_ai = 0.0
+            if ticket_legs:
+                base_ai = sum(_get_leg_score(l) for l in ticket_legs) / len(ticket_legs)
+
+            # BOOST za premium lige: svaka noga dodaje (league_priority * 0.01).
+            boost = sum(league_priority_from_leg(l) for l in ticket_legs) * 0.01
+            ai_score = round(base_ai + boost, 2)
+
             tickets.append(
                 {
                     "legs": ticket_legs,
                     "total_odds": _compute_total_odds(ticket_legs),
-                    "ai_score": round(
-                        sum(_get_leg_score(l) for l in ticket_legs) / len(ticket_legs),
-                        2,
-                    ),
+                    "ai_score": ai_score,
                 }
             )
 
@@ -366,7 +306,6 @@ def _mix_legs_into_tickets(
             f"tickets_now={len(tickets)}"
         )
 
-    # Final sort by AI score desc (then total_odds desc for stability).
     tickets.sort(
         key=lambda t: (
             float(t.get("ai_score", 0.0)),
@@ -389,11 +328,14 @@ def _build_legs_for_builders(
     max_legs_per_builder: int = 200,
 ) -> List[Dict[str, Any]]:
     """
-    Executes a list of builders and returns a de-duplicated legs pool.
+    Poziva listu buildera i vraća deduplikovan pool legs.
 
-    Each builder returned legs list[dict]. We:
-      - cap by max_legs_per_builder
-      - deduplicate by (fixture_id, market) pair
+    Po builderu:
+      - cap na max_legs_per_builder
+      - deduplikacija po (fixture_id, market)
+    Na kraju:
+      - globalni sort po EU priority + kickoff + score
+      - preferira top evropske lige pre ostalih.
     """
     pool: List[Dict[str, Any]] = []
     seen: Set[Tuple[int, str]] = set()
@@ -409,7 +351,6 @@ def _build_legs_for_builders(
         try:
             legs = builder(fixtures=fixtures, odds=odds, max_legs=max_legs_per_builder)
         except TypeError:
-            # Backward compatibility: some builders might not accept max_legs.
             legs = builder(fixtures=fixtures, odds=odds)  # type: ignore[call-arg]
         except Exception as exc:
             print(f"[ERR] Builder {code} raised exception: {exc}")
@@ -435,7 +376,20 @@ def _build_legs_for_builders(
             seen.add(key)
             pool.append(leg)
 
-    print(f"[DBG] === Builder group done → pool size: {len(pool)} ===")
+    if not pool:
+        print("[DBG] === Builder group done → pool size: 0 ===")
+        return []
+
+    # Globalni sort: prvo EU priority, pa leg score, pa kickoff.
+    def _pool_key(leg: Dict[str, Any]) -> Tuple[int, float, str]:
+        prio = league_priority_from_leg(leg)
+        score = _get_leg_score(leg)
+        kickoff = str(leg.get("kickoff") or "")
+        return (prio, score, kickoff)
+
+    pool.sort(key=_pool_key, reverse=True)
+
+    print(f"[DBG] === Builder group done → pool size: {len(pool)} (sorted by EU priority) ===")
     return pool
 
 
@@ -450,20 +404,20 @@ def _build_ticket_set_for_config(
     odds: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Builds one logical ticket set based on configuration entry.
+    Build jednog logičkog tiketskog seta na osnovu config zapisa.
 
-    Expected config keys:
+    Očekivani ključеvi u config:
       - code: str
       - label: str
       - description: str
-      - builders: list[str]              # registry codes
-      - target_min: float                # min total odds
-      - target_max: float                # max total odds
+      - builders: list[str]
+      - target_min: float
+      - target_max: float
       - legs_min: int
       - legs_max: int
       - max_family_per_ticket: int
-      - max_tickets: int                 # how many tickets in this set
-      - min_leg_score: float (optional)  # drop legs below this score
+      - max_tickets: int
+      - min_leg_score: float (opciono)
     """
     code = config["code"]
     label = config.get("label", code)
@@ -474,7 +428,6 @@ def _build_ticket_set_for_config(
 
     print(f"[DBG] SET {code} → legs in pool before scoring filter: {len(legs)}")
 
-    # Optional global leg score filter.
     min_leg_score = float(config.get("min_leg_score", 0.0))
     if min_leg_score > 0.0:
         legs = [leg for leg in legs if _get_leg_score(leg) >= min_leg_score]
@@ -509,7 +462,6 @@ def _build_ticket_set_for_config(
             "tickets": [],
         }
 
-    # Assign stable IDs and normalize fields.
     out_tickets: List[Dict[str, Any]] = []
     for idx, t in enumerate(tickets, start=1):
         ticket_id = f"{code}-{idx}"
@@ -545,39 +497,17 @@ def build_all_ticket_sets(
     ticket_sets_config: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Main public API for the engine.
+    Glavni public API za engine.
 
-    Parameters:
-      - fixtures: raw fixtures list (already cleaned / filtered upstream)
-      - odds: raw odds list (already cleaned / filtered upstream)
-      - ticket_sets_config: list of dict entries (see _build_ticket_set_for_config)
-
-    Returns structure compatible with frontend & Telegram layers, e.g.:
-
+    Vraća strukturu kompatibilnu sa frontendom i Telegram slojem:
     {
-        "date": "2025-11-21",
-        "generated_at": "2025-11-21T07:03:12Z",
-        "sets": [
-            {
-                "code": "SETGOALSMIX",
-                "label": "GOALS MIX",
-                "status": "OK",
-                "tickets": [
-                    {
-                        "id": "SETGOALSMIX-1",
-                        "total_odds": 2.31,
-                        "ai_score": 77.3,
-                        "legs": [ ... ],
-                    },
-                    ...
-                ],
-            },
-            ...
-        ],
+        "date": "YYYY-MM-DD",
+        "generated_at": "ISO timestamp",
+        "sets": [ ... ],
     }
     """
     today = date.today().isoformat()
-    generated_at = datetime.utcnow().isoformat()
+    generated_at = datetime.utcnow().isoformat() + "Z"
 
     print(f"[DBG] === Engine start for {today} ===")
     print(f"[DBG] Fixtures in: {len(fixtures)}, odds in: {len(odds)}")
@@ -610,17 +540,10 @@ def build_all_ticket_sets(
     }
 
 
-# Backwards compatibility layer
-# ------------------------------
-# U postojećem kodu se najverovatnije koristi build_ticket_sets(fixtures, odds)
-# i globalni TICKET_SETS_CONFIG definisan u ovom modu.
-# Ovaj deo omogućava da engine radi i u staroj i u novoj šemi.
-
+# Backwards kompatibilnost – globalni TICKET_SETS_CONFIG ako već postoji
 try:
     TICKET_SETS_CONFIG  # type: ignore[name-defined]
 except NameError:
-    # Ako nema konfiguracije, ostavi prazno – skripta neće pucati,
-    # samo neće biti izgrađen nijedan set dok se ne definiše konfiguracija.
     TICKET_SETS_CONFIG: List[Dict[str, Any]] = []
 
 
@@ -629,7 +552,6 @@ def build_ticket_sets(
     odds: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Stari naziv entrypoint funkcije – sada samo prosleđuje na build_all_ticket_sets
-    koristeći globalni TICKET_SETS_CONFIG.
+    Stari entrypoint – koristi globalni TICKET_SETS_CONFIG.
     """
     return build_all_ticket_sets(fixtures, odds, TICKET_SETS_CONFIG)
