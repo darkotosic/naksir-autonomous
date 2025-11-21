@@ -1,7 +1,12 @@
 name: Naksir Autonomous Daily
 
 on:
+  # ručno pokretanje iz Actions taba
   workflow_dispatch:
+
+  # automatski run svaki dan u 06:00 UTC (~07:00 CET)
+  schedule:
+    - cron: "0 6 * * *"
 
 jobs:
   build:
@@ -31,7 +36,7 @@ jobs:
           echo "=== Running morning_run.py ==="
           python -m cron_jobs.morning_run
 
-      # Safety net – obavezno postoji public/
+      # Safety net – obavezno postoji public/ i fajlovi u njemu
       - name: Create and populate public folder
         run: |
           mkdir -p public
@@ -51,7 +56,7 @@ jobs:
             cp outputs/metadata.json public/metadata.json
           fi
 
-          # mora postojati index.html da Pages ne da 404
+          # index.html da Pages ne da 404
           if [ ! -f public/index.html ]; then
             echo "<html><body><h2>Naksir Autonomous</h2><p>Static feed.</p></body></html>" > public/index.html
           fi
