@@ -1,4 +1,3 @@
-# cron_jobs/morning_run.py
 from __future__ import annotations
 
 import os
@@ -7,7 +6,7 @@ import json
 from datetime import datetime, date
 from typing import Any, Dict, List
 
-# Dodaj root projekta u sys.path
+# Dodaj root projekta u sys.path (da core_data, builders itd. rade i u GitHub Actions)
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
@@ -21,7 +20,7 @@ from ai_engine.meta import (
     annotate_ticket_sets_with_score,
     get_adaptive_min_score,
 )
-# NOVO: in-depth AI analiza po legu
+# In-depth AI analiza po legu
 from ai_engine.in_depth import attach_in_depth_analysis
 
 TELEGRAM_MORNING_CHAT_ID = os.getenv("TELEGRAM_MORNING_CHAT_ID", "").strip()
@@ -138,10 +137,11 @@ def main() -> None:
 
     # 1) Ingest svih podataka (LAYER 1)
     try:
+        print("[INGEST] Calling fetch_all_data(days_ahead=2)...")
         ingest_summary = fetch_all_data(days_ahead=2)
         print("[INGEST] fetch_all_data completed.")
         try:
-            print("[INGEST] Raw summary:")
+            print("[INGEST] Raw summary (truncated):")
             print(json.dumps(ingest_summary, indent=2, ensure_ascii=False)[:2000])
         except Exception:
             print("[INGEST] (summary not JSON-serializable)")
@@ -185,16 +185,33 @@ def main() -> None:
 
     # 3) Build all ticket sets (LAYER 2)
     try:
-        # koristimo backwards-compatible wrapper koji koristi globalni TICKET_SETS_CONFIG
+        print("[ENGINE] Building ticket sets...")
         ticket_sets = build_ticket_sets(fixtures, odds)
     except Exception as e:
         print(f"[ERROR] build_ticket_sets failed: {e}")
         return
 
+    if not isinstance(ticket_sets, dict):
+        print("[ERROR] build_ticket_sets did not return dict. Aborting.")
+        return
+
+    # Osnovni meta podaci ako nedostaju
+    if "date" not in ticket_sets:
+        ticket_sets["date"] = today.isoformat()
+    if "generated_at" not in ticket_sets:
+        ticket_sets["generated_at"] = datetime.utcnow().isoformat()
+
+    # Raw statistika pre AI filtera
+    sets = ticket_sets.get("sets", []) or []
+    total_tickets_raw = sum(len(s.get("tickets", [])) for s in sets)
+    print(
+        f"[ENGINE] Raw sets={len(sets)}, raw total tickets={total_tickets_raw}"
+    )
 
     # 3a) AI scoring (LAYER 3)
     try:
         ticket_sets = annotate_ticket_sets_with_score(ticket_sets)
+        print("[AI] Ticket sets annotated with score.")
     except Exception as e:
         print(f"[WARN] annotate_ticket_sets_with_score failed: {e}")
 
@@ -214,6 +231,7 @@ def main() -> None:
         fixtures_count=fixtures_count,
         raw_total_tickets=total_tickets_raw,
     )
+    print(f"[AI] Adaptive MIN_SCORE={MIN_SCORE:.1f}")
 
     filtered_sets: List[Dict[str, Any]] = []
     for s in ticket_sets.get("sets", []) or []:
@@ -250,7 +268,7 @@ def main() -> None:
     if not sets_after:
         print("[WARN] No ticket sets left after AI filter. tickets.json will be empty 'sets':[].")
 
-    # osnovna meta za frontend (vidi public/index.html)
+    # Meta za frontend / Pages
     ticket_sets["meta"] = {
         "fixtures_count": fixtures_count,
         "odds_count": len(odds),
@@ -276,7 +294,7 @@ def main() -> None:
     except Exception as e:
         print(f"[ERROR] write_tickets_json failed: {e}")
 
-    # 5) Tiketa na Telegram (ako je podešen chat id)
+    # 5) Tiketi na Telegram (ako je podešen chat id)
     #    Šaljemo samo TOP 2 tiketa po AI score-u preko svih setova.
     if TELEGRAM_MORNING_CHAT_ID and sets_after:
         MAX_TELEGRAM_TICKETS = 2
@@ -345,3 +363,11 @@ def main() -> None:
             print("[TELEGRAM] TELEGRAM_MORNING_CHAT_ID not set, skipping Telegram step.")
         if not sets_after:
             print("[TELEGRAM] No tickets after AI filter, nothing to send.")
+
+    print(f"[{datetime.utcnow().isoformat()}] Morning run END")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    # Bitno: da se main stvarno pozove kada Actions radi `python -m cron_jobs.morning_run`
+    main()
