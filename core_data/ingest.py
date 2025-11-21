@@ -26,50 +26,124 @@ logger = logging.getLogger(__name__)
 # Konfiguracija liga i rizika
 # ---------------------------------------------------------------------
 
-# TODO: prebaci po potrebi u posebni leagues.py modul
-# Primer allow lista (top evropske lige)
-DEFAULT_LEAGUES: List[int] = [
+# Default allow liste liga – možeš da ih prilagodiš.
+DEFAULT_LEAGUES: List[int] = [2,3,913,5,536,808,960,10,667,29,30,31,32,37,33,34,848,311,310,342,218,144,315,71,
+    169,210,346,233,39,40,41,42,703,244,245,61,62,78,79,197,271,164,323,135,136,389,
+    88,89,408,103,104,106,94,283,235,286,287,322,140,141,113,207,208,202,203,909,268,269,270,340
     39,   # Premier League
     140,  # La Liga
     135,  # Serie A
-    # dodaj po potrebi: 78 (Bundesliga), 61 (Ligue 1), itd.
+    78,   # Bundesliga
+    61,   # Ligue 1
+    88,   # Eredivisie
+    201,  # Super Liga Srbije (primer)
+    2,    # Champions League
+    3,    # Europa League
+    848,  # Conference League
 ]
 
-# Mapiranje liga -> sezona (OBAVEZNO prilagodi aktuelnoj sezoni)
+# Mape liga -> sezona (API-FOOTBALL zahteva season param)
 SEASON_MAP: Dict[int, int] = {
     39: 2024,
     140: 2024,
     135: 2024,
-    # 78: 2024,
-    # 61: 2024,
+    78: 2024,
+    61: 2024,
+    88: 2024,
+    201: 2024,
+    2: 2024,
+    3: 2024,
+    848: 2024,
 }
 
-# Lige koje želiš da tretiraš kao rizične (npr. Iran, UAE, egzotične)
+# Lige koje želiš da izbegneš (rizik, slaba pouzdanost, itd.)
 RISKY_LEAGUES: List[int] = [
-    # primer: 751, 752
+    291,  # Iran Azadegan League (primer)
+    292,  # Iran Persian Gulf Pro League (primer)
+    299,  # UAE Pro League (primer)
 ]
 
 
 # ---------------------------------------------------------------------
-# Helper funkcije
+# Helperi
 # ---------------------------------------------------------------------
 
-def _date_str(d: Optional[date] = None) -> str:
-    return (d or date.today()).isoformat()
+
+def _date_str(d: date) -> str:
+    return d.isoformat()
 
 
-def get_dates_window(days_ahead: int = 2) -> List[date]:
+def _daterange(start_day: date, days_ahead: int) -> List[date]:
+    return [start_day + timedelta(days=i) for i in range(days_ahead + 1)]
+
+
+def _filter_risky_leagues(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Vraća listu datuma: danas + narednih X dana.
-    Koristi se za fixtures/odds ingest prozor.
+    Izbaci fixture-e iz liga koje su u RISKY_LEAGUES.
     """
-    today = date.today()
-    return [today + timedelta(days=i) for i in range(days_ahead + 1)]
+
+    if not fixtures:
+        return fixtures
+
+    filtered: List[Dict[str, Any]] = []
+    dropped = 0
+
+    for fx in fixtures:
+        league = fx.get("league") or {}
+        league_id = league.get("id")
+        if league_id in RISKY_LEAGUES:
+            dropped += 1
+            continue
+        filtered.append(fx)
+
+    if dropped:
+        logger.info("[INGEST] Dropped %s fixtures from risky leagues.", dropped)
+
+    return filtered
+
+
+def _summarize_items(label: str, raw: Any) -> List[Dict[str, Any]]:
+    """
+    Helper koji proverava format sirovog responsa i vadi listu dict-ova.
+    Ovo je defensive logika jer API-FOOTBALL uglavnom vraća:
+        {"response": [ {...}, {...} ]}
+    ali može da bude i direktna lista ili nešto treće.
+    """
+
+    items: List[Dict[str, Any]] = []
+
+    if raw is None:
+        logger.warning("[INGEST] %s returned None.", label)
+        return items
+
+    if isinstance(raw, list):
+        items = [x for x in raw if isinstance(x, dict)]
+        print(f"[DEBUG] {label}: raw list with {len(items)} dict items.")
+        return items
+
+    if isinstance(raw, dict):
+        # API-FOOTBALL stil: {"response": [...]}
+        if "response" in raw and isinstance(raw["response"], list):
+            items = [x for x in raw["response"] if isinstance(x, dict)]
+            print(f"[DEBUG] {label}: dict with response[{len(items)}].")
+            return items
+
+        # već očišćena lista u nekom polju
+        for key in ("items", "data", "rows"):
+            val = raw.get(key)
+            if isinstance(val, list):
+                items = [x for x in val if isinstance(x, dict)]
+                print(f"[DEBUG] {label}: dict with {key}[{len(items)}].")
+                return items
+
+    logger.warning("[INGEST] %s: unsupported raw type %s", label, type(raw))
+    return items
 
 
 # ---------------------------------------------------------------------
-# LAYER 1 – Data Automation: fetch_all_data
+# Glavni ingest
 # ---------------------------------------------------------------------
+
 
 def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
     """
@@ -86,33 +160,86 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
     /cache/YYYY-MM-DD/standings/<league>.json
     /cache/YYYY-MM-DD/stats/<league>_<team>.json
     /cache/YYYY-MM-DD/h2h/<fixture>.json
+
+    Vraća summary dict za dalje logovanje.
     """
 
     today = date.today()
-    today_str = _date_str(today)
+    days = _daterange(today, days_ahead=days_ahead)
 
-    logger.info("[INGEST] Starting fetch_all_data for date=%s, days_ahead=%s", today_str, days_ahead)
+    logger.info("[INGEST] fetch_all_data start: today=%s, days_ahead=%s", today, days_ahead)
 
+    # Aggregated counters za summary
+    fixtures_total = 0
+    odds_total = 0
+    standings_total = 0
+    stats_total = 0
+    h2h_total = 0
+
+    # Beležimo i današnji fixtures odvojeno (za stats/h2h)
+    fixtures_today: List[Dict[str, Any]] = []
+
+    # Summary per-day
     results_summary: Dict[str, Any] = {
         "fixtures_days": [],
         "odds_days": [],
-        "standings": [],
-        "team_stats": [],
-        "h2h_fixtures": [],
+        "standings_leagues": [],
+        "stats_entries": [],
+        "h2h_entries": [],
     }
 
-    # 1) FIXTURES + ODDS za danas + naredna 2 dana
-    fixtures_today: List[Dict[str, Any]] = []
-
-    for d in get_dates_window(days_ahead=days_ahead):
+    # -------------------------
+    # 1) Fixtures + Odds po danima
+    # -------------------------
+    for d in days:
         ds = _date_str(d)
 
         # 1.1 Fixtures
         raw_fixtures = fetch_fixtures_by_date(ds)
         fixtures = clean_fixtures(raw_fixtures)
+        fixtures = _filter_risky_leagues(fixtures)
         write_json("fixtures.json", fixtures, day=d)
         results_summary["fixtures_days"].append({"date": ds, "count": len(fixtures)})
         logger.info("[INGEST] Fixtures loaded for %s: count=%s", ds, len(fixtures))
+
+        # === DEBUG: distribucija liga i sample mečeva po datumu ===
+        if fixtures:
+            league_counts: Dict[str, int] = {}
+            sample_fixtures: List[Dict[str, Any]] = []
+
+            for fx in fixtures:
+                league = fx.get("league") or {}
+                teams = fx.get("teams") or {}
+                fixture_meta = fx.get("fixture") or {}
+
+                lid = league.get("id")
+                lname = league.get("name")
+                lcountry = league.get("country")
+
+                key = f"{lcountry} | {lname} ({lid})"
+                league_counts[key] = league_counts.get(key, 0) + 1
+
+                if len(sample_fixtures) < 15:
+                    sample_fixtures.append(
+                        {
+                            "fixture_id": fixture_meta.get("id"),
+                            "league": key,
+                            "kickoff": fixture_meta.get("date"),
+                            "home": (teams.get("home") or {}).get("name"),
+                            "away": (teams.get("away") or {}).get("name"),
+                        }
+                    )
+
+            logger.debug(
+                "[INGEST][DEBUG] Fixtures league distribution for %s: %s",
+                ds,
+                "; ".join(f"{k} -> {v}" for k, v in sorted(league_counts.items())),
+            )
+            logger.debug(
+                "[INGEST][DEBUG] Fixtures sample for %s: %s",
+                ds,
+                json.dumps(sample_fixtures, ensure_ascii=False),
+            )
 
         if d == today:
             fixtures_today = fixtures
@@ -123,6 +250,34 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
         write_json("odds.json", odds, day=d)
         results_summary["odds_days"].append({"date": ds, "count": len(odds)})
         logger.info("[INGEST] Odds loaded for %s: count=%s", ds, len(odds))
+
+        # === DEBUG: distribucija liga u odds ===
+        if odds:
+            odds_by_league: Dict[int, int] = {}
+            for row in odds:
+                lid = row.get("league_id")
+                if isinstance(lid, int):
+                    odds_by_league[lid] = odds_by_league.get(lid, 0) + 1
+
+            label_lines: List[str] = []
+            for lid, cnt in sorted(odds_by_league.items()):
+                league_label = None
+                # probaj da pronađeš opis lige u fixtures za isti dan
+                for fx in fixtures:
+                    league = fx.get("league") or {}
+                    if league.get("id") == lid:
+                        league_label = f"{league.get('country')} | {league.get('name')} ({lid})"
+                        break
+                if not league_label:
+                    league_label = f"league_id={lid}"
+
+                label_lines.append(f"{league_label}: odds={cnt}")
+
+            logger.debug(
+                "[INGEST][DEBUG] Odds league distribution for %s: %s",
+                ds,
+                "; ".join(label_lines),
+            )
 
     # Ako iz nekog razloga danas nema fixtures, probaj fallback iz keša
     if not fixtures_today:
@@ -140,222 +295,175 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
 
         raw_standings = fetch_standings(league_id=league_id, season=season)
         standings = clean_standings(raw_standings)
-        write_json(f"standings/{league_id}.json", standings, day=today)
-        results_summary["standings"].append({"league": league_id, "teams": len(standings)})
-        logger.info("[INGEST] Standings loaded for league=%s season=%s: teams=%s", league_id, season, len(standings))
+        write_json(f"standings_{league_id}.json", standings, day=today)
+        results_summary["standings_leagues"].append(
+            {"league_id": league_id, "season": season, "rows": len(standings)}
+        )
+        logger.info(
+            "[INGEST] Standings loaded for league_id=%s season=%s: rows=%s",
+            league_id,
+            season,
+            len(standings),
+        )
 
-    # 3) TEAM STATS – za timove koji se pojavljuju u današnjim fixtures
-    team_ids_by_league: Dict[int, set[int]] = {}
+    # 3) Team stats za timove iz današnjih fixtures
+    team_stats_counter = 0
+    seen_teams: Dict[str, bool] = {}
 
     for fx in fixtures_today:
         league = fx.get("league") or {}
-        lid = league.get("id")
-        if lid not in DEFAULT_LEAGUES:
-            continue
-
+        fixture = fx.get("fixture") or {}
         teams = fx.get("teams") or {}
-        home = teams.get("home") or {}
-        away = teams.get("away") or {}
-        home_id = home.get("id")
-        away_id = away.get("id")
 
-        if not home_id or not away_id:
-            continue
-
-        team_ids_by_league.setdefault(lid, set()).update({home_id, away_id})
-
-    for league_id, team_ids in team_ids_by_league.items():
+        league_id = league.get("id")
         season = SEASON_MAP.get(league_id)
         if not season:
-            logger.warning("[INGEST] No SEASON_MAP entry for league_id=%s, skipping team stats", league_id)
             continue
 
-        for team_id in sorted(team_ids):
+        for side in ("home", "away"):
+            tinfo = (teams.get(side) or {})
+            team_id = tinfo.get("id")
+            if not team_id:
+                continue
+
+            key = f"{league_id}_{team_id}"
+            if seen_teams.get(key):
+                continue
+
             raw_stats = fetch_team_stats(league_id=league_id, season=season, team_id=team_id)
             stats = clean_team_stats(raw_stats)
-            write_json(f"stats/{league_id}_{team_id}.json", stats, day=today)
-            results_summary["team_stats"].append(
-                {"league": league_id, "team_id": team_id}
-            )
-        logger.info(
-            "[INGEST] Team stats loaded for league=%s season=%s teams=%s",
-            league_id,
-            season,
-            len(team_ids),
-        )
+            write_json(f"stats_{league_id}_{team_id}.json", stats, day=today)
+            seen_teams[key] = True
+            team_stats_counter += 1
 
-    # 4) H2H (last=5) za sve današnje mečeve
-    h2h_count = 0
+    results_summary["stats_entries"].append(
+        {
+            "date": today.isoformat(),
+            "teams": len(seen_teams),
+            "files": team_stats_counter,
+        }
+    )
+    logger.info("[INGEST] Team stats entries written: teams=%s, files=%s", len(seen_teams), team_stats_counter)
+
+    # 4) H2H(last=5) za sve današnje mečeve
+    h2h_counter = 0
     for fx in fixtures_today:
         fixture = fx.get("fixture") or {}
         teams = fx.get("teams") or {}
-        home = teams.get("home") or {}
-        away = teams.get("away") or {}
 
         fixture_id = fixture.get("id")
-        home_id = home.get("id")
-        away_id = away.get("id")
-
-        if not fixture_id or not home_id or not away_id:
+        home = (teams.get("home") or {}).get("id")
+        away = (teams.get("away") or {}).get("id")
+        if not fixture_id or not home or not away:
             continue
 
-        raw_h2h = fetch_h2h(home_id=home_id, away_id=away_id, last=5)
+        raw_h2h = fetch_h2h(home=home, away=away, last=5)
         h2h = clean_h2h(raw_h2h)
-        write_json(f"h2h/{fixture_id}.json", h2h, day=today)
-        h2h_count += 1
+        write_json(f"h2h_{fixture_id}.json", h2h, day=today)
+        h2h_counter += 1
 
-    results_summary["h2h_fixtures"].append({"date": today_str, "count": h2h_count})
-    logger.info("[INGEST] H2H loaded for today=%s: fixtures=%s", today_str, h2h_count)
+    results_summary["h2h_entries"].append(
+        {
+            "date": today.isoformat(),
+            "fixtures": len(fixtures_today),
+            "files": h2h_counter,
+        }
+    )
+    logger.info("[INGEST] H2H entries written: fixtures=%s, files=%s", len(fixtures_today), h2h_counter)
 
-    logger.info("[INGEST] fetch_all_data completed for %s", today_str)
-    return results_summary
+    # Aggregated totals
+    fixtures_total = sum(x["count"] for x in results_summary["fixtures_days"])
+    odds_total = sum(x["count"] for x in results_summary["odds_days"])
+    standings_total = sum(x["rows"] for x in results_summary["standings_leagues"])
+    stats_total = sum(x["files"] for x in results_summary["stats_entries"])
+    h2h_total = sum(x["files"] for x in results_summary["h2h_entries"])
+
+    summary = {
+        "today": today.isoformat(),
+        "days_ahead": days_ahead,
+        "fixtures_total": fixtures_total,
+        "odds_total": odds_total,
+        "standings_total": standings_total,
+        "stats_total": stats_total,
+        "h2h_total": h2h_total,
+        "fixtures_days": results_summary["fixtures_days"],
+        "odds_days": results_summary["odds_days"],
+        "standings_leagues": results_summary["standings_leagues"],
+        "stats_entries": results_summary["stats_entries"],
+        "h2h_entries": results_summary["h2h_entries"],
+        # placeholder za AI min_score: kasnije se popunjava u morning_run
+        "min_score": None,
+        "raw_sets": None,
+        "raw_total_tickets": None,
+    }
+
+    logger.info(
+        "[INGEST] Summary: fixtures_total=%s, odds_total=%s, standings_total=%s, stats_total=%s, h2h_total=%s",
+        fixtures_total,
+        odds_total,
+        standings_total,
+        stats_total,
+        h2h_total,
+    )
+
+    # all_data.json je opcioni agregat koji može da sadrži
+    # referencu na sve gore navedeno (ako želiš)
+    all_data = {
+        "fixtures_today": fixtures_today,
+        "fixtures_days": results_summary["fixtures_days"],
+        "odds_days": results_summary["odds_days"],
+        "standings_leagues": results_summary["standings_leagues"],
+        "stats_entries": results_summary["stats_entries"],
+        "h2h_entries": results_summary["h2h_entries"],
+    }
+    write_json("all_data.json", all_data, day=today)
+
+    return summary
 
 
 # ---------------------------------------------------------------------
-# 07:00 Morning Data Readiness Check
+# Health / readiness
 # ---------------------------------------------------------------------
+
 
 def check_data_readiness(target_date: Optional[date] = None) -> Dict[str, Any]:
     """
-    07:00 Morning Data Readiness Checklist u kodu.
+    Jednostavan readiness check koji možeš da pozoveš posle ingest-a
+    ili iz health endpointa.
 
-    Proverava:
-    - API status i rate limit
-    - Da li postoje fixtures/odds/standings fajlovi za target_date
-    - Osnovnu validaciju: null polja, rizične lige, invalid odds
-
-    Vraća:
-    {
-      "ok": bool,
-      "errors": [...],
-      "warnings": [...],
-      "stats": {...},
-      "cache": {...}  # snapshot strukture
-    }
+    Gleda da li postoje keš fajlovi za zadati dan
+    i vraća status OK / WARNING / ERROR.
     """
-    if target_date is None:
-        target_date = date.today()
+    d = target_date or date.today()
 
-    ds = _date_str(target_date)
-    errors: List[str] = []
-    warnings: List[str] = []
-    stats: Dict[str, Any] = {}
+    cache_info = cache_status(day=d)
 
-    logger.info("[CHECK] Data readiness check for %s", ds)
+    status = "OK"
+    messages: List[str] = []
 
-    # 1) API health
-    api_status = get_api_status()
-    if not api_status["ok"]:
-        errors.append("API-Football status NOT OK")
-        logger.error("[CHECK] API status NOT OK")
+    if cache_info.get("missing_files"):
+        status = "WARNING"
+        messages.append(f"Missing files: {', '.join(cache_info['missing_files'])}")
 
-    rl = api_status.get("rate_limit") or {}
-    try:
-        limit = int(rl.get("x-ratelimit-requests-limit") or 0)
-        remaining = int(rl.get("x-ratelimit-requests-remaining") or 0)
-        if limit > 0:
-            used_pct = (limit - remaining) / limit * 100
-            stats["rate_limit_used_pct"] = used_pct
-            if used_pct > 85:
-                warnings.append(f"API rate limit usage high: {used_pct:.1f}%")
-                logger.warning("[CHECK] Rate limit high: used=%.1f%%", used_pct)
-    except ValueError:
-        warnings.append("Cannot parse rate limit headers")
-        logger.warning("[CHECK] Cannot parse rate limit headers: %s", rl)
+    if cache_info.get("stale_files"):
+        if status == "OK":
+            status = "WARNING"
+        messages.append(f"Stale files: {', '.join(cache_info['stale_files'])}")
 
-    # 2) Data ingestion – da li fajlovi postoje i osnovne brojke
-    fixtures = read_json("fixtures.json", day=target_date)
-    odds = read_json("odds.json", day=target_date)
-
-    if not fixtures:
-        errors.append("Missing or empty fixtures.json")
-        logger.error("[CHECK] Missing or empty fixtures.json for %s", ds)
-    if not odds:
-        errors.append("Missing or empty odds.json")
-        logger.error("[CHECK] Missing or empty odds.json for %s", ds)
-
-    stats["fixtures_count"] = len(fixtures or [])
-    stats["odds_count"] = len(odds or [])
-
-    # Proveri da li postoji barem jedan standings fajl
-    has_standings = False
-    for league_id in DEFAULT_LEAGUES:
-        st = read_json(f"standings/{league_id}.json", day=target_date)
-        if st:
-            has_standings = True
-            break
-
-    if not has_standings:
-        warnings.append("Standings not loaded for default leagues (check cron)")
-        logger.warning("[CHECK] Standings missing for default leagues on %s", ds)
-
-    # 3) Data validation – null polja, rizične lige, invalid odds range
-    # 3.1 Fixtures validacija
-    if fixtures:
-        risky_leagues_found = set()
-        for fx in fixtures:
-            fixture = fx.get("fixture") or {}
-            league = fx.get("league") or {}
-            teams = fx.get("teams") or {}
-
-            if not fixture or not league or not teams:
-                errors.append("Fixture with missing basic fields detected")
-                logger.error("[CHECK] Fixture with missing basic fields detected")
-                break
-
-            league_id = league.get("id")
-            if league_id in RISKY_LEAGUES:
-                risky_leagues_found.add(league_id)
-
-            if not fixture.get("date"):
-                errors.append("Fixture without date detected")
-                logger.error("[CHECK] Fixture without date detected")
-                break
-
-        if risky_leagues_found:
-            warnings.append(f"Risk leagues present in fixtures: {sorted(risky_leagues_found)}")
-            logger.warning(
-                "[CHECK] Risk leagues present in fixtures: %s",
-                sorted(risky_leagues_found),
-            )
-
-    # 3.2 Odds validacija – ovde ne proveravamo range, jer clean_odds ga već filtrira.
-    # Ali proverimo da li ima nečega; ako je count=0, to je problem.
-    if odds and len(odds) == 0:
-        warnings.append("Odds list exists but has 0 entries")
-
-    # 4) Cache snapshot (diagnostic)
-    cache_info = cache_status(day=target_date)
-
-    ok = len(errors) == 0
-    result = {
-        "ok": ok,
-        "errors": errors,
-        "warnings": warnings,
-        "stats": stats,
+    return {
+        "date": d.isoformat(),
+        "status": status,
+        "details": messages,
         "cache": cache_info,
     }
 
-    logger.info("[CHECK] Data readiness result for %s: ok=%s", ds, ok)
-    if errors:
-        logger.error("[CHECK] Errors: %s", errors)
-    if warnings:
-        logger.warning("[CHECK] Warnings: %s", warnings)
-
-    return result
-
-
-# ---------------------------------------------------------------------
-# CLI / GitHub Actions entrypoint
-# ---------------------------------------------------------------------
 
 def run_morning_ingest_and_check() -> None:
     """
-    Helper koji koristiš u GitHub Actions (07:00 job):
-
+    Helper koji:
     - pokreće fetch_all_data()
-    - pokreće check_data_readiness()
-    - printa JSON summary na stdout (da vidiš sve u logu)
+    - odmah radi check_data_readiness()
+    - printa sve u JSON formatu (korisno za debug/CLI)
     """
     summary = fetch_all_data(days_ahead=2)
     readiness = check_data_readiness()
