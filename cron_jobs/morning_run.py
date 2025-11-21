@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import sys
 import json
-from datetime import datetime, date
-from typing import Any, Dict, List
+from datetime import datetime, date, timedelta
+from typing import Any, Dict, List, Tuple
 
 # Dodaj root projekta u sys.path (da core_data, builders itd. rade i u GitHub Actions)
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -12,7 +12,7 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from core_data.ingest import fetch_all_data
-from core_data.cache import read_json
+from core_data.cache import read_json, read_or_fallback
 from builders.engine import build_ticket_sets
 from outputs.pages_writer import write_tickets_json
 from outputs.telegram_bot import send_message
@@ -68,6 +68,27 @@ def _normalize_items(raw: Any, label: str) -> List[Dict[str, Any]]:
     # ako je nešto neočekivano (string itd.)
     print(f"[WARN] {label}: unsupported raw type={type(raw)}. Returning empty list.")
     return []
+
+
+def _read_with_fallback(name: str, today: date) -> Tuple[Any, date]:
+    """Load cached JSON with automatic fallback to previous days."""
+    primary = read_json(name, today)
+    if primary is not None:
+        print(f"[CACHE] Loaded {name} for {today.isoformat()}")
+        return primary, today
+
+    for i in range(1, 3):
+        prev_day = today - timedelta(days=i)
+        fallback = read_or_fallback(name, primary_day=prev_day, fallback_days=0)
+        if fallback is not None:
+            print(
+                f"[CACHE] Fallback hit for {name}: using {prev_day.isoformat()} "
+                f"(missing today)"
+            )
+            return fallback, prev_day
+
+    print(f"[CACHE] {name} missing for {today.isoformat()} and previous 2 days.")
+    return None, today
 
 
 def _preview_fixtures(fixtures: List[Dict[str, Any]], max_items: int = 5) -> None:
@@ -150,9 +171,9 @@ def main() -> None:
         return
 
     # 2) Učitaj fixtures, odds i all_data iz cache-a
-    fixtures_raw = read_json("fixtures.json", today)
-    odds_raw = read_json("odds.json", today)
-    all_data_raw = read_json("all_data.json", today)
+    fixtures_raw, fixtures_day = _read_with_fallback("fixtures.json", today)
+    odds_raw, odds_day = _read_with_fallback("odds.json", today)
+    all_data_raw, all_data_day = _read_with_fallback("all_data.json", today)
 
     if fixtures_raw is None:
         print("[ERROR] fixtures.json for today not found in cache. Aborting.")
@@ -171,7 +192,10 @@ def main() -> None:
     fixtures = _normalize_items(fixtures_raw, "fixtures")
     odds = _normalize_items(odds_raw, "odds")
 
-    print(f"[DATA] Fixtures count={len(fixtures)} | Odds rows count={len(odds)}")
+    print(
+        f"[DATA] Fixtures count={len(fixtures)} (source day={fixtures_day}) | "
+        f"Odds rows count={len(odds)} (source day={odds_day})"
+    )
 
     if not fixtures:
         print("[ERROR] No fixtures after normalization. Aborting.")
@@ -234,6 +258,7 @@ def main() -> None:
     print(f"[AI] Adaptive MIN_SCORE={MIN_SCORE:.1f}")
 
     filtered_sets: List[Dict[str, Any]] = []
+    drop_trace: List[Dict[str, Any]] = []
     for s in ticket_sets.get("sets", []) or []:
         tickets = s.get("tickets", [])
         kept = []
@@ -242,6 +267,17 @@ def main() -> None:
             if score >= MIN_SCORE:
                 kept.append(t)
             else:
+                reason = (
+                    f"Score {score:.1f} below cutoff {MIN_SCORE:.1f}"
+                )
+                drop_trace.append(
+                    {
+                        "set": s.get("code"),
+                        "ticket": t.get("ticket_id"),
+                        "reason": reason,
+                        "raw_score": score,
+                    }
+                )
                 print(
                     f"[FILTER] Dropped ticket {t.get('ticket_id')} from set {s.get('code')} "
                     f"due to low score={score:.1f} (< {MIN_SCORE:.1f})"
@@ -250,6 +286,15 @@ def main() -> None:
             s2 = dict(s)
             s2["tickets"] = kept
             filtered_sets.append(s2)
+        else:
+            drop_trace.append(
+                {
+                    "set": s.get("code"),
+                    "ticket": None,
+                    "reason": "No tickets survived AI filter",
+                    "raw_score": None,
+                }
+            )
 
     ticket_sets["sets"] = filtered_sets
 
@@ -278,6 +323,13 @@ def main() -> None:
         "sets_after_filter": len(sets_after),
         "tickets_after_filter": total_tickets_after,
         "generated_at": ticket_sets.get("generated_at"),
+        "analysis_mode": ticket_sets.get("analysis_mode", "autonomous_v2"),
+        "drop_trace": drop_trace,
+        "source_days": {
+            "fixtures": fixtures_day.isoformat(),
+            "odds": odds_day.isoformat(),
+            "all_data": all_data_day.isoformat(),
+        },
     }
 
     ticket_sets["summary"] = ticket_sets.get("summary") or {
