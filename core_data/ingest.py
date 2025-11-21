@@ -27,9 +27,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 
 # Default allow liste liga – možeš da ih prilagodiš.
-DEFAULT_LEAGUES: List[int] = [2,3,913,5,536,808,960,10,667,29,30,31,32,37,33,34,848,311,310,342,218,144,315,71,
-    169,210,346,233,39,40,41,42,703,244,245,61,62,78,79,197,271,164,323,135,136,389,
-    88,89,408,103,104,106,94,283,235,286,287,322,140,141,113,207,208,202,203,909,268,269,270,340,
+DEFAULT_LEAGUES: List[int] = [
     39,   # Premier League
     140,  # La Liga
     135,  # Serie A
@@ -39,7 +37,9 @@ DEFAULT_LEAGUES: List[int] = [2,3,913,5,536,808,960,10,667,29,30,31,32,37,33,34,
     201,  # Super Liga Srbije (primer)
     2,    # Champions League
     3,    # Europa League
-    848,  # Conference League
+    8,482,3,913,5,536,808,960,10,667,29,30,31,32,37,33,34,848,311,310,342,218,144,315,71,
+    169,210,346,233,39,40,41,42,703,244,245,61,62,78,79,197,271,164,323,135,136,389,
+    88,89,408,103,104,106,94,283,235,286,287,322,140,141,113,207,208,202,203,909,268,269,270,340,  # Conference League
 ]
 
 # Mape liga -> sezona (API-FOOTBALL zahteva season param)
@@ -102,44 +102,6 @@ def _filter_risky_leagues(fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]
     return filtered
 
 
-def _summarize_items(label: str, raw: Any) -> List[Dict[str, Any]]:
-    """
-    Helper koji proverava format sirovog responsa i vadi listu dict-ova.
-    Ovo je defensive logika jer API-FOOTBALL uglavnom vraća:
-        {"response": [ {...}, {...} ]}
-    ali može da bude i direktna lista ili nešto treće.
-    """
-
-    items: List[Dict[str, Any]] = []
-
-    if raw is None:
-        logger.warning("[INGEST] %s returned None.", label)
-        return items
-
-    if isinstance(raw, list):
-        items = [x for x in raw if isinstance(x, dict)]
-        print(f"[DEBUG] {label}: raw list with {len(items)} dict items.")
-        return items
-
-    if isinstance(raw, dict):
-        # API-FOOTBALL stil: {"response": [...]}
-        if "response" in raw and isinstance(raw["response"], list):
-            items = [x for x in raw["response"] if isinstance(x, dict)]
-            print(f"[DEBUG] {label}: dict with response[{len(items)}].")
-            return items
-
-        # već očišćena lista u nekom polju
-        for key in ("items", "data", "rows"):
-            val = raw.get(key)
-            if isinstance(val, list):
-                items = [x for x in val if isinstance(x, dict)]
-                print(f"[DEBUG] {label}: dict with {key}[{len(items)}].")
-                return items
-
-    logger.warning("[INGEST] %s: unsupported raw type %s", label, type(raw))
-    return items
-
-
 # ---------------------------------------------------------------------
 # Glavni ingest
 # ---------------------------------------------------------------------
@@ -157,9 +119,9 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
     Sve se upisuje u:
     /cache/YYYY-MM-DD/fixtures.json
     /cache/YYYY-MM-DD/odds.json
-    /cache/YYYY-MM-DD/standings/<league>.json
-    /cache/YYYY-MM-DD/stats/<league>_<team>.json
-    /cache/YYYY-MM-DD/h2h/<fixture>.json
+    /cache/YYYY-MM-DD/standings_<league>.json
+    /cache/YYYY-MM-DD/stats_<league>_<team>.json
+    /cache/YYYY-MM-DD/h2h_<fixture>.json
 
     Vraća summary dict za dalje logovanje.
     """
@@ -271,8 +233,6 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
                 if not league_label:
                     league_label = f"league_id={lid}"
 
-                label_lines.append(f"{league_label}: odds={cnt}")
-
             logger.debug(
                 "[INGEST][DEBUG] Odds league distribution for %s: %s",
                 ds,
@@ -284,13 +244,19 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
         cached_fixtures = read_json("fixtures.json", day=today)
         if isinstance(cached_fixtures, list):
             fixtures_today = cached_fixtures
-            logger.warning("[INGEST] No fresh fixtures for today, using cached fixtures for %s", today_str)
+            logger.warning(
+                "[INGEST] No fresh fixtures for today, using cached fixtures for %s",
+                today.isoformat(),
+            )
 
     # 2) STANDINGS za sve DEFAULT_LEAGUES
     for league_id in DEFAULT_LEAGUES:
         season = SEASON_MAP.get(league_id)
         if not season:
-            logger.warning("[INGEST] No SEASON_MAP entry for league_id=%s, skipping standings", league_id)
+            logger.warning(
+                "[INGEST] No SEASON_MAP entry for league_id=%s, skipping standings",
+                league_id,
+            )
             continue
 
         raw_standings = fetch_standings(league_id=league_id, season=season)
@@ -312,7 +278,6 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
 
     for fx in fixtures_today:
         league = fx.get("league") or {}
-        fixture = fx.get("fixture") or {}
         teams = fx.get("teams") or {}
 
         league_id = league.get("id")
@@ -343,7 +308,11 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
             "files": team_stats_counter,
         }
     )
-    logger.info("[INGEST] Team stats entries written: teams=%s, files=%s", len(seen_teams), team_stats_counter)
+    logger.info(
+        "[INGEST] Team stats entries written: teams=%s, files=%s",
+        len(seen_teams),
+        team_stats_counter,
+    )
 
     # 4) H2H(last=5) za sve današnje mečeve
     h2h_counter = 0
@@ -352,12 +321,13 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
         teams = fx.get("teams") or {}
 
         fixture_id = fixture.get("id")
-        home = (teams.get("home") or {}).get("id")
-        away = (teams.get("away") or {}).get("id")
-        if not fixture_id or not home or not away:
+        home_id = (teams.get("home") or {}).get("id")
+        away_id = (teams.get("away") or {}).get("id")
+        if not fixture_id or not home_id or not away_id:
             continue
 
-        raw_h2h = fetch_h2h(home=home, away=away, last=5)
+        # OVO JE ISPRAVAN POZIV – home_id / away_id
+        raw_h2h = fetch_h2h(home_id=home_id, away_id=away_id, last=5)
         h2h = clean_h2h(raw_h2h)
         write_json(f"h2h_{fixture_id}.json", h2h, day=today)
         h2h_counter += 1
@@ -369,7 +339,11 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
             "files": h2h_counter,
         }
     )
-    logger.info("[INGEST] H2H entries written: fixtures=%s, files=%s", len(fixtures_today), h2h_counter)
+    logger.info(
+        "[INGEST] H2H entries written: fixtures=%s, files=%s",
+        len(fixtures_today),
+        h2h_counter,
+    )
 
     # Aggregated totals
     fixtures_total = sum(x["count"] for x in results_summary["fixtures_days"])
@@ -406,8 +380,7 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
         h2h_total,
     )
 
-    # all_data.json je opcioni agregat koji može da sadrži
-    # referencu na sve gore navedeno (ako želiš)
+    # all_data.json je opcioni agregat koji može da sadrži referencu na ključne fajlove
     all_data = {
         "fixtures_today": fixtures_today,
         "fixtures_days": results_summary["fixtures_days"],
