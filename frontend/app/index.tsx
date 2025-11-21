@@ -8,6 +8,7 @@ import {
   Linking,
   SafeAreaView,
   ScrollView,
+  ImageBackground,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Colors, layout } from "../constants/theme";
@@ -23,42 +24,50 @@ export default function LandingScreen() {
 
   return (
     <SafeAreaView style={s.safeArea}>
-      <ScrollView contentContainerStyle={s.container}>
-        <View style={s.glowLayer} />
+      <ImageBackground
+        source={require("../assets/background.png.png")}
+        style={s.background}
+        imageStyle={s.backgroundImage}
+      >
+        <View style={s.overlay}>
+          <ScrollView contentContainerStyle={s.container}>
+            <View style={s.glowLayer} />
 
-        <Text style={s.logo}>Naksir Ultimate</Text>
-        <Text style={s.tagline}>2+ Tickets, AI assisted — Naksir soccer analyst.</Text>
+            <Text style={s.logo}>Naksir Ultimate</Text>
+            <Text style={s.tagline}>2+ Tickets, AI assisted — Naksir soccer analyst.</Text>
 
-        <View style={s.linksRow}>
-          {legalLinks.map((link) => (
+            <View style={s.linksRow}>
+              {legalLinks.map((link) => (
+                <Pressable
+                  key={link.label}
+                  onPress={() => Linking.openURL(link.url)}
+                  style={({ pressed }) => [s.linkButton, pressed && s.pressed]}
+                >
+                  <Text style={s.linkText}>{link.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+
             <Pressable
-              key={link.label}
-              onPress={() => Linking.openURL(link.url)}
-              style={({ pressed }) => [s.linkButton, pressed && s.pressed]}
+              onPress={() => Linking.openURL("https://t.me/naksiranalysis")}
+              style={({ pressed }) => [s.primaryButton, pressed && s.pressed]}
             >
-              <Text style={s.linkText}>{link.label}</Text>
+              <Text style={s.primaryText}>Telegram</Text>
+              <Text style={s.subText}>Join our analysis channel</Text>
             </Pressable>
-          ))}
+
+            <View style={s.spacer} />
+
+            <Pressable
+              onPress={() => router.push("/tickets")}
+              style={({ pressed }) => [s.ctaButton, pressed && s.pressed]}
+            >
+              <Text style={s.ctaLabel}>Naksir Ultimate 2+ Tickets</Text>
+              <Text style={s.ctaHint}>Enter for daily updated Tickets →</Text>
+            </Pressable>
+          </ScrollView>
         </View>
-
-        <Pressable
-          onPress={() => Linking.openURL("https://t.me/naksiranalysis")}
-          style={({ pressed }) => [s.primaryButton, pressed && s.pressed]}
-        >
-          <Text style={s.primaryText}>Telegram</Text>
-          <Text style={s.subText}>Join our analysis channel</Text>
-        </Pressable>
-
-        <View style={s.spacer} />
-
-        <Pressable
-          onPress={() => router.push("/tickets")}
-          style={({ pressed }) => [s.ctaButton, pressed && s.pressed]}
-        >
-          <Text style={s.ctaLabel}>Naksir Ultimate 2+ Tickets</Text>
-          <Text style={s.ctaHint}>Enter for daily updated Tickets →</Text>
-        </Pressable>
-      </ScrollView>
+      </ImageBackground>
     </SafeAreaView>
   );
 }
@@ -67,6 +76,17 @@ const s = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: Colors.background,
+  },
+  background: {
+    flex: 1,
+    width: "100%",
+  },
+  backgroundImage: {
+    opacity: 0.55,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(2, 4, 9, 0.8)",
   },
   container: {
     flexGrow: 1,
