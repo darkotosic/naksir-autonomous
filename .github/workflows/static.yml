@@ -36,6 +36,7 @@ jobs:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_MORNING_CHAT_ID: ${{ secrets.TELEGRAM_MORNING_CHAT_ID }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "=== Running morning_run.py ==="
           python -m cron_jobs.morning_run
