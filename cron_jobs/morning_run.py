@@ -14,7 +14,7 @@ if ROOT_DIR not in sys.path:
 
 from core_data.ingest import fetch_all_data
 from core_data.cache import read_json
-from builders.engine import build_all_ticket_sets
+from builders.engine import build_ticket_sets
 from outputs.pages_writer import write_tickets_json
 from outputs.telegram_bot import send_message
 from ai_engine.meta import (
@@ -185,19 +185,12 @@ def main() -> None:
 
     # 3) Build all ticket sets (LAYER 2)
     try:
-        ticket_sets = build_all_ticket_sets(fixtures, odds)
+        # koristimo backwards-compatible wrapper koji koristi globalni TICKET_SETS_CONFIG
+        ticket_sets = build_ticket_sets(fixtures, odds)
     except Exception as e:
-        print(f"[ERROR] build_all_ticket_sets failed: {e}")
+        print(f"[ERROR] build_ticket_sets failed: {e}")
         return
 
-    sets = ticket_sets.get("sets", []) or []
-    total_tickets_raw = sum(len(s.get("tickets", [])) for s in sets)
-    print(f"[ENGINE] Raw sets={len(sets)}, raw total tickets={total_tickets_raw}")
-    for s in sets:
-        print(
-            f"[ENGINE] Set {s.get('code')} | status={s.get('status')} | "
-            f"tickets={len(s.get('tickets', []))}"
-        )
 
     # 3a) AI scoring (LAYER 3)
     try:
