@@ -540,11 +540,197 @@ def build_all_ticket_sets(
     }
 
 
-# Backwards kompatibilnost – globalni TICKET_SETS_CONFIG ako već postoji
-try:
-    TICKET_SETS_CONFIG  # type: ignore[name-defined]
-except NameError:
-    TICKET_SETS_CONFIG: List[Dict[str, Any]] = []
+# ---------------------------------------------------------------------------
+# TICKET SETS CONFIG – 12 setova iz kombinacije buildera
+# ---------------------------------------------------------------------------
+
+TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
+    # S1 – HT Over 0.5 (klasični “prvi tiket dana”)
+    {
+        "code": "S1_HT_O05",
+        "label": "[S1] HT Over 0.5",
+        "description": "Halftime Over 0.5 Goals – stabilni mečevi za gol u prvom poluvremenu.",
+        "builders": ["HT_O05"],
+        "target_min": 2.00,
+        "target_max": 3.00,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 3,   # samo HT_GOALS family, dozvoli do 3 meča
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S2 – Over 1.5 (2+ kvota, low-risk)
+    {
+        "code": "S2_OVER_15",
+        "label": "[S2] Over 1.5 2+",
+        "description": "Over 1.5 Goals – fokus na mečeve sa visokim očekivanim brojem golova.",
+        "builders": ["O15"],
+        "target_min": 2.00,
+        "target_max": 3.00,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 3,   # GOALS family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S3 – Over 2.5 (agresivniji goals tiket)
+    {
+        "code": "S3_OVER_25",
+        "label": "[S3] Over 2.5 2+",
+        "description": "Over 2.5 Goals – tiket za više golova u napadački orijentisanim ligama.",
+        "builders": ["O25"],
+        "target_min": 2.00,
+        "target_max": 3.20,
+        "legs_min": 2,
+        "legs_max": 4,
+        "max_family_per_ticket": 3,   # GOALS family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S4 – Under 3.5 (kontrolisani under)
+    {
+        "code": "S4_UNDER_35",
+        "label": "[S4] Under 3.5 2+",
+        "description": "Under 3.5 Goals – tiket za mečeve sa očekivano manjim brojem golova.",
+        "builders": ["U35"],
+        "target_min": 2.00,
+        "target_max": 3.00,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 3,   # GOALS_UNDER family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S5 – Goals Mix (O1.5 + O2.5 + U3.5 + BTTS) – core “GOALS MIX” set
+    {
+        "code": "S5_GOALS_MIX",
+        "label": "[S5] Goals Mix",
+        "description": "Mix golova: Over 1.5 / Over 2.5 / Under 3.5 / BTTS – raznovrstan goals tiket.",
+        "builders": ["O15", "O25", "U35", "BTTS_YES"],
+        "target_min": 2.00,
+        "target_max": 3.20,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 2,   # max 2 iz iste market_family (GOALS / GOALS_UNDER / BTTS)
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S6 – BTTS YES (oba daju gol)
+    {
+        "code": "S6_BTTS_YES",
+        "label": "[S6] BTTS YES 2+",
+        "description": "Both Teams To Score – YES, fokus na otvorenim mečevima.",
+        "builders": ["BTTS_YES"],
+        "target_min": 2.00,
+        "target_max": 3.00,
+        "legs_min": 2,
+        "legs_max": 4,
+        "max_family_per_ticket": 3,   # BTTS family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S7 – BTTS NO (jedan ostaje na nuli)
+    {
+        "code": "S7_BTTS_NO",
+        "label": "[S7] BTTS NO 2+",
+        "description": "Both Teams To Score – NO, mečevi sa jasnim favoritom ili defanzivnim stilom.",
+        "builders": ["BTTS_NO"],
+        "target_min": 2.00,
+        "target_max": 3.00,
+        "legs_min": 2,
+        "legs_max": 4,
+        "max_family_per_ticket": 3,   # BTTS family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S8 – Home Win (favoriti kod kuće)
+    {
+        "code": "S8_HOME_FAV",
+        "label": "[S8] Home Favorites",
+        "description": "Pobede domaćina – fokus na stabilnim favoritima kod kuće.",
+        "builders": ["HOME"],
+        "target_min": 2.00,
+        "target_max": 2.80,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 3,   # RESULT family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S9 – Away Win (value na gostima)
+    {
+        "code": "S9_AWAY_VALUE",
+        "label": "[S9] Away Value",
+        "description": "Pobede gostiju – value mečevi gde je gost realno jači od kvote.",
+        "builders": ["AWAY"],
+        "target_min": 2.00,
+        "target_max": 3.20,
+        "legs_min": 2,
+        "legs_max": 4,
+        "max_family_per_ticket": 3,   # RESULT family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S10 – Double Chance Safe (1X / X2)
+    {
+        "code": "S10_DC_SAFE",
+        "label": "[S10] Double Chance Safe",
+        "description": "Double Chance 1X / X2 – konzervativan tiket sa širim safety marginom.",
+        "builders": ["DC_1X", "DC_X2"],
+        "target_min": 2.00,
+        "target_max": 2.80,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 3,   # DOUBLE_CHANCE family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S11 – Result Mix (HOME/AWAY/DRAW) – rezultat tiketi
+    {
+        "code": "S11_RESULT_MIX",
+        "label": "[S11] Result Mix",
+        "description": "Mix HOME / AWAY / DRAW – rezultat tiketi za klasične 1X2 scenarije.",
+        "builders": ["HOME", "AWAY", "DRAW"],
+        "target_min": 2.00,
+        "target_max": 3.20,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 3,   # RESULT family
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+
+    # S12 – Full Mix (glavni flagship set)
+    {
+        "code": "S12_FULL_MIX",
+        "label": "[S12] Full Mix 2+",
+        "description": "Glavni miks: goals + BTTS + rezultat + double chance + HT golovi.",
+        "builders": [
+            "O15", "O25", "U35",
+            "BTTS_YES", "BTTS_NO",
+            "DC_1X", "DC_X2",
+            "HOME", "AWAY", "DRAW",
+            "HT_O05",
+        ],
+        "target_min": 2.00,
+        "target_max": 3.50,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 2,   # max 2 iz iste family unutar tiketa
+        "max_tickets": 3,
+        "min_leg_score": 0.0,
+    },
+]
 
 
 def build_ticket_sets(
@@ -552,6 +738,6 @@ def build_ticket_sets(
     odds: List[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    Stari entrypoint – koristi globalni TICKET_SETS_CONFIG.
+    Entry point koji koristi globalni TICKET_SETS_CONFIG.
     """
     return build_all_ticket_sets(fixtures, odds, TICKET_SETS_CONFIG)
