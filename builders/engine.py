@@ -7,6 +7,104 @@ from typing import Any, Dict, List, Tuple, Set, Optional
 
 from .registry import get_builder
 
+# ---------------------------------------------------------------------------
+# Globalna konfiguracija setova tiketa (TICKET_SETS_CONFIG)
+# ---------------------------------------------------------------------------
+# Svaki "set" koristi grupu build-era i pravila:
+#  - builders: šifre iz builders/registry.py (O15, O25, U35, BTTS_YES, HOME, DC_1X, ...)
+#  - target_min/target_max: ukupna kvota po tiketu (npr. 2.0–3.0)
+#  - legs_min/legs_max: broj utakmica u tiketu
+#  - max_family_per_ticket: koliko puta ista market_family može da se pojavi u jednom tiketu
+#  - max_tickets: maksimalan broj tiketa u tom setu
+
+TICKET_SETS_CONFIG: List[Dict[str, Any]] = [
+    # 1) Safe goals mix (O1.5 + O2.5 + U3.5)
+    {
+        "code": "S1_GOALS_MIX_SAFE",
+        "label": "[S1] Safe Goals Mix 2+",
+        "description": "Mix O1.5, O2.5 i U3.5 sa limitom na market family (max 2 po tiketu).",
+        "builders": ["O15", "O25", "U35"],
+        "target_min": 2.0,
+        "target_max": 2.8,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 2,
+        "max_tickets": 3,
+        # min_leg_score ostavljamo na default 0.0, jer builderi trenutno ne pune model_score/confidence
+    },
+
+    # 2) Over 1.5 fokus (klasičan “sigurniji” goals tiket)
+    {
+        "code": "S2_OVER_15",
+        "label": "[S2] Over 1.5 2+",
+        "description": "Fokus na Over 1.5, više mečeva u tiketu.",
+        "builders": ["O15"],
+        "target_min": 2.0,
+        "target_max": 3.0,
+        "legs_min": 3,
+        "legs_max": 6,
+        "max_family_per_ticket": 3,  # goals family može i više puta, jer je ovo mono-goals tiket
+        "max_tickets": 3,
+    },
+
+    # 3) Over 2.5 fokus
+    {
+        "code": "S3_OVER_25",
+        "label": "[S3] Over 2.5 2+",
+        "description": "Agresivniji goals tiket sa Over 2.5 marketom.",
+        "builders": ["O25"],
+        "target_min": 2.0,
+        "target_max": 3.2,
+        "legs_min": 2,
+        "legs_max": 5,
+        "max_family_per_ticket": 3,
+        "max_tickets": 3,
+    },
+
+    # 4) BTTS fokus (YES/NO)
+    {
+        "code": "S4_BTTS",
+        "label": "[S4] BTTS Focus 2+",
+        "description": "BTTS YES/NO tiket, max 3 meča, čista BTTS family.",
+        "builders": ["BTTS_YES", "BTTS_NO"],
+        "target_min": 2.0,
+        "target_max": 3.0,
+        "legs_min": 2,
+        "legs_max": 3,
+        "max_family_per_ticket": 3,  # sve je BTTS family, nema smisla da gušimo
+        "max_tickets": 3,
+    },
+
+    # 5) Rezultat + Double Chance (HOME, AWAY, 1X, X2)
+    {
+        "code": "S5_RESULT_DC",
+        "label": "[S5] Result & DC 2+",
+        "description": "Mix HOME/AWAY i DC (1X, X2) sa blagim limitom market family.",
+        "builders": ["HOME", "AWAY", "DC_1X", "DC_X2"],
+        "target_min": 2.0,
+        "target_max": 3.0,
+        "legs_min": 2,
+        "legs_max": 4,
+        "max_family_per_ticket": 2,
+        "max_tickets": 3,
+    },
+
+    # 6) HT Over 0.5 – specijal za prvo poluvreme
+    {
+        "code": "S6_HT_OVER_05",
+        "label": "[S6] HT Over 0.5 2+",
+        "description": "Prvo poluvreme goals (HT Over 0.5), do 5 mečeva u tiketu.",
+        "builders": ["HT_O05"],
+        "target_min": 2.0,
+        "target_max": 3.0,
+        "legs_min": 3,
+        "legs_max": 5,
+        "max_family_per_ticket": 3,
+        "max_tickets": 3,
+    },
+]
+
+
 ###############################################################################
 # Helper functions
 ###############################################################################
