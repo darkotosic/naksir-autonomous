@@ -8,13 +8,28 @@ on:
   schedule:
     - cron: "0 6 * * *"
 
+concurrency:
+  group: naksir-autonomous-daily
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # Cache za pip da build bude brži
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -35,6 +50,16 @@ jobs:
         run: |
           echo "=== Running morning_run.py ==="
           python -m cron_jobs.morning_run
+
+      # Debug: šta je engine izbacio u outputs/
+      - name: Debug outputs folder
+        run: |
+          echo "=== DEBUG: outputs/ listing ==="
+          if [ -d outputs ]; then
+            ls -R outputs
+          else
+            echo "outputs/ folder ne postoji."
+          fi
 
       # Safety net – obavezno postoji public/ i fajlovi u njemu
       - name: Create and populate public folder
@@ -60,6 +85,32 @@ jobs:
           if [ ! -f public/index.html ]; then
             echo "<html><body><h2>Naksir Autonomous</h2><p>Static feed.</p></body></html>" > public/index.html
           fi
+
+      # Debug: sumarno koliko setova / tiketa imamo u tickets.json
+      - name: Debug tickets.json summary
+        run: |
+          echo "=== DEBUG: tickets.json summary ==="
+          python - << 'PY'
+import json, os
+
+def summarize(path: str) -> None:
+    if not os.path.exists(path):
+        print(f"[DBG] {path} → MISSING")
+        return
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    sets = data.get("sets", [])
+    total_tickets = sum(len(s.get("tickets", [])) for s in sets)
+    print(f"[DBG] {path}: date={data.get('date')} sets={len(sets)} tickets={total_tickets}")
+
+summarize("outputs/tickets.json")
+summarize("public/tickets.json")
+
+if os.path.exists("public/evaluation.json"):
+    with open("public/evaluation.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+    print(f"[DBG] public/evaluation.json: date={data.get('date')} tickets={len(data.get('tickets', []))}")
+PY
 
       - name: Upload public folder as artifact
         uses: actions/upload-pages-artifact@v3
