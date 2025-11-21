@@ -6,7 +6,13 @@ from typing import Any, Dict, List
 import os
 from openai import OpenAI
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+API_KEY = os.getenv("OPENAI_API_KEY")
+
+if API_KEY:
+    client = OpenAI(api_key=API_KEY)
+else:
+    client = None
+    print("[IN_DEPTH] WARNING: OPENAI_API_KEY not set -> AI analysis will be skipped.")
 
 
 def _extract_basic_context_for_leg(leg: Dict[str, Any], all_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -23,7 +29,11 @@ def _extract_basic_context_for_leg(leg: Dict[str, Any], all_data: Dict[str, Any]
     fixture_id = leg["fixture_id"]
 
     # PSEUDOKOD – prilagodi prema tome kako čuvaš response u all_data.json
-    fixtures = {f["fixture"]["id"]: f for f in all_data.get("fixtures", {}).get("response", []) if isinstance(f, dict)}
+    fixtures = {
+        f["fixture"]["id"]: f
+        for f in all_data.get("fixtures", {}).get("response", [])
+        if isinstance(f, dict) and f.get("fixture", {}).get("id") is not None
+    }
 
     fixture = fixtures.get(fixture_id, {})
 
@@ -78,8 +88,13 @@ Available raw data snapshot (may be incomplete, use only if useful):
 def _generate_analysis_text(leg: Dict[str, Any], all_data: Dict[str, Any]) -> List[str]:
     """
     Vraća listu 5–7 rečenica za jedan leg.
-    Ako nešto pukne, vraća prazan list – frontend onda samo neće prikazati in-depth layer.
+    Ako nema OPENAI_API_KEY ili nešto pukne, vraća prazan list –
+    frontend onda samo neće prikazati in-depth layer.
     """
+    # ako nema klijenta (nema API key-a) -> skip
+    if client is None:
+        return []
+
     try:
         ctx = _extract_basic_context_for_leg(leg, all_data)
         prompt = _build_prompt(leg, ctx)
@@ -97,17 +112,14 @@ def _generate_analysis_text(leg: Dict[str, Any], all_data: Dict[str, Any]) -> Li
             max_output_tokens=320,
         )
 
-        # Izvuci čist tekst
+        # Izvuci čist tekst – shape se može menjati, zato je ovo malo defenzivno
         text = ""
         try:
-            text = resp.output[0].content[0].text
+            text = resp.output[0].content[0].text  # možeš kasnije da prilagodiš po potrebi
         except Exception:
-            # fallback ako se promeni shape responsa
             text = str(resp)
 
-        # Na brzinu rascepa na rečenice; možeš kasnije da ulepšaš regexom
         sentences = [s.strip() for s in text.replace("\n", " ").split(".") if s.strip()]
-        # Uzmi 5–7
         return [s + "." for s in sentences[:7]]
     except Exception as e:
         print(f"[IN_DEPTH] Error for fixture {leg.get('fixture_id')}: {e}")
