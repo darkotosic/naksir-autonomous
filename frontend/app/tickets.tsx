@@ -21,7 +21,10 @@ export default function TicketsScreen() {
   return (
     <View style={s.screen}>
       <View style={s.header}>
-        <Pressable onPress={() => router.back()} style={({ pressed }) => [s.back, pressed && s.pressed]}>
+        <Pressable
+          onPress={() => router.back()}
+          style={({ pressed }) => [s.back, pressed && s.pressed]}
+        >
           <Text style={s.backText}>← Back</Text>
         </Pressable>
         <View style={s.titleWrap}>
@@ -34,17 +37,24 @@ export default function TicketsScreen() {
         style={s.scroll}
         contentContainerStyle={s.content}
         refreshControl={
-          <RefreshControl refreshing={loading} onRefresh={reload} tintColor={Colors.accent} />
+          <RefreshControl
+            refreshing={loading}
+            onRefresh={reload}
+            tintColor={Colors.accent}
+          />
         }
       >
         <View style={s.heroCard}>
           <Text style={s.heroTitle}>Autonomous AI picks</Text>
           <Text style={s.heroCopy}>
-            Curated 2+ tickets with neon-grade confidence. Pull to refresh for the latest drop.
+            Curated 2+ tickets with neon-grade confidence. Pull to refresh for
+            the latest drop.
           </Text>
         </View>
 
-        {loading && !sets.length && <ActivityIndicator style={{ marginTop: 30 }} size="large" />}
+        {loading && !sets.length && (
+          <ActivityIndicator style={{ marginTop: 30 }} size="large" />
+        )}
 
         {error ? <Text style={s.error}>⚠️ {error}</Text> : null}
 
@@ -56,13 +66,30 @@ export default function TicketsScreen() {
                 <Text style={s.pillText}>{set.tickets.length} tickets</Text>
               </View>
             </View>
-            {set.tickets.map((t) => (
-              <TicketCard key={t.ticket_id} ticket={t} />
+
+            {set.tickets.map((t, idx) => (
+              <Pressable
+                key={t.ticket_id ?? `${set.code}-${idx}`}
+                onPress={() =>
+                  router.push({
+                    pathname: "/ticket-detail",
+                    params: {
+                      setLabel: set.label || set.code,
+                      ticket: JSON.stringify(t),
+                    },
+                  })
+                }
+                style={({ pressed }) => [pressed && s.pressed]}
+              >
+                <TicketCard ticket={t} />
+              </Pressable>
             ))}
           </View>
         ))}
 
-        {!loading && !error && !sets.length && <Text style={s.empty}>Nema tiketa za danas.</Text>}
+        {!loading && !error && !sets.length && (
+          <Text style={s.empty}>Nema tiketa za danas.</Text>
+        )}
       </ScrollView>
     </View>
   );

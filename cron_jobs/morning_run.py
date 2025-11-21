@@ -1,4 +1,3 @@
-# cron_jobs/morning_run.py
 from __future__ import annotations
 
 import os
@@ -7,20 +6,22 @@ import json
 from datetime import datetime, date
 from typing import Any, Dict, List
 
-# Dodaj root projekta u sys.path
+# Dodaj root projekta u sys.path (da core_data, builders itd. rade i u GitHub Actions)
 ROOT_DIR = os.path.dirname(os.path.dirname(__file__))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from core_data.ingest import fetch_all_data
 from core_data.cache import read_json
-from builders.engine import build_all_ticket_sets
+from builders.engine import build_ticket_sets
 from outputs.pages_writer import write_tickets_json
 from outputs.telegram_bot import send_message
 from ai_engine.meta import (
     annotate_ticket_sets_with_score,
     get_adaptive_min_score,
 )
+# In-depth AI analiza po legu
+from ai_engine.in_depth import attach_in_depth_analysis
 
 TELEGRAM_MORNING_CHAT_ID = os.getenv("TELEGRAM_MORNING_CHAT_ID", "").strip()
 
@@ -136,10 +137,11 @@ def main() -> None:
 
     # 1) Ingest svih podataka (LAYER 1)
     try:
+        print("[INGEST] Calling fetch_all_data(days_ahead=2)...")
         ingest_summary = fetch_all_data(days_ahead=2)
         print("[INGEST] fetch_all_data completed.")
         try:
-            print("[INGEST] Raw summary:")
+            print("[INGEST] Raw summary (truncated):")
             print(json.dumps(ingest_summary, indent=2, ensure_ascii=False)[:2000])
         except Exception:
             print("[INGEST] (summary not JSON-serializable)")
@@ -147,9 +149,10 @@ def main() -> None:
         print(f"[ERROR] fetch_all_data failed: {e}")
         return
 
-    # 2) Učitaj fixtures i odds iz cache-a
+    # 2) Učitaj fixtures, odds i all_data iz cache-a
     fixtures_raw = read_json("fixtures.json", today)
     odds_raw = read_json("odds.json", today)
+    all_data_raw = read_json("all_data.json", today)
 
     if fixtures_raw is None:
         print("[ERROR] fixtures.json for today not found in cache. Aborting.")
@@ -157,6 +160,13 @@ def main() -> None:
     if odds_raw is None:
         print("[ERROR] odds.json for today not found in cache. Aborting.")
         return
+    if all_data_raw is None:
+        print("[WARN] all_data.json for today not found in cache. In-depth analysis will be skipped.")
+        all_data: Dict[str, Any] = {}
+    else:
+        all_data = all_data_raw if isinstance(all_data_raw, dict) else {}
+        if not all_data:
+            print("[WARN] all_data.json is not a dict. In-depth analysis will be skipped.")
 
     fixtures = _normalize_items(fixtures_raw, "fixtures")
     odds = _normalize_items(odds_raw, "odds")
@@ -175,32 +185,53 @@ def main() -> None:
 
     # 3) Build all ticket sets (LAYER 2)
     try:
-        ticket_sets = build_all_ticket_sets(fixtures, odds)
+        print("[ENGINE] Building ticket sets...")
+        ticket_sets = build_ticket_sets(fixtures, odds)
     except Exception as e:
-        print(f"[ERROR] build_all_ticket_sets failed: {e}")
+        print(f"[ERROR] build_ticket_sets failed: {e}")
         return
 
+    if not isinstance(ticket_sets, dict):
+        print("[ERROR] build_ticket_sets did not return dict. Aborting.")
+        return
+
+    # Osnovni meta podaci ako nedostaju
+    if "date" not in ticket_sets:
+        ticket_sets["date"] = today.isoformat()
+    if "generated_at" not in ticket_sets:
+        ticket_sets["generated_at"] = datetime.utcnow().isoformat()
+
+    # Raw statistika pre AI filtera
     sets = ticket_sets.get("sets", []) or []
     total_tickets_raw = sum(len(s.get("tickets", [])) for s in sets)
-    print(f"[ENGINE] Raw sets={len(sets)}, raw total tickets={total_tickets_raw}")
-    for s in sets:
-        print(
-            f"[ENGINE] Set {s.get('code')} | status={s.get('status')} | "
-            f"tickets={len(s.get('tickets', []))}"
-        )
+    print(
+        f"[ENGINE] Raw sets={len(sets)}, raw total tickets={total_tickets_raw}"
+    )
 
     # 3a) AI scoring (LAYER 3)
     try:
         ticket_sets = annotate_ticket_sets_with_score(ticket_sets)
+        print("[AI] Ticket sets annotated with score.")
     except Exception as e:
         print(f"[WARN] annotate_ticket_sets_with_score failed: {e}")
 
-    # 3b) Adaptivni AI filter
+    # 3b) In-depth AI analiza po svakom legu (LAYER 3b)
+    if all_data:
+        try:
+            ticket_sets = attach_in_depth_analysis(ticket_sets, all_data)
+            print("[AI] In-depth analysis attached to legs.")
+        except Exception as e:
+            print(f"[WARN] attach_in_depth_analysis failed: {e}")
+    else:
+        print("[AI] Skipping in-depth analysis (no all_data available).")
+
+    # 3c) Adaptivni AI filter
     fixtures_count = len(fixtures)
     MIN_SCORE = get_adaptive_min_score(
         fixtures_count=fixtures_count,
         raw_total_tickets=total_tickets_raw,
     )
+    print(f"[AI] Adaptive MIN_SCORE={MIN_SCORE:.1f}")
 
     filtered_sets: List[Dict[str, Any]] = []
     for s in ticket_sets.get("sets", []) or []:
@@ -237,7 +268,7 @@ def main() -> None:
     if not sets_after:
         print("[WARN] No ticket sets left after AI filter. tickets.json will be empty 'sets':[].")
 
-    # osnovna meta za frontend (vidi public/index.html)
+    # Meta za frontend / Pages
     ticket_sets["meta"] = {
         "fixtures_count": fixtures_count,
         "odds_count": len(odds),
@@ -263,9 +294,19 @@ def main() -> None:
     except Exception as e:
         print(f"[ERROR] write_tickets_json failed: {e}")
 
-    # 5) Slanje tiketa na Telegram (ako je podešen chat id)
+    # 5) Tiketi na Telegram (ako je podešen chat id)
+    #    Šaljemo samo TOP 2 tiketa po AI score-u preko svih setova.
     if TELEGRAM_MORNING_CHAT_ID and sets_after:
-        print(f"[TELEGRAM] Sending tickets to chat={TELEGRAM_MORNING_CHAT_ID}")
+        MAX_TELEGRAM_TICKETS = 2
+
+        print(
+            f"[TELEGRAM] Selecting up to {MAX_TELEGRAM_TICKETS} top-scoring tickets "
+            f"for chat={TELEGRAM_MORNING_CHAT_ID}"
+        )
+
+        candidates = []
+
+        # Skupi sve tikete iz setova sa OK/PARTIAL statusom
         for s in sets_after:
             status = s.get("status")
             if status and status not in ("OK", "PARTIAL"):
@@ -274,11 +315,40 @@ def main() -> None:
 
             set_code = s.get("code", "N/A")
             set_label = s.get("label", "N/A")
+
             for ticket in s.get("tickets", []):
+                raw_score = ticket.get("score")
+                try:
+                    score_val = float(raw_score) if raw_score is not None else 0.0
+                except (TypeError, ValueError):
+                    score_val = 0.0
+
+                candidates.append(
+                    {
+                        "score": score_val,
+                        "set_code": set_code,
+                        "set_label": set_label,
+                        "ticket": ticket,
+                    }
+                )
+
+        if not candidates:
+            print("[TELEGRAM] No eligible tickets for Telegram after filtering.")
+        else:
+            # Sortiraj po score silazno i uzmi samo prva 2
+            candidates.sort(key=lambda x: x["score"], reverse=True)
+            selected = candidates[:MAX_TELEGRAM_TICKETS]
+
+            for rank, item in enumerate(selected, start=1):
+                ticket = item["ticket"]
+                set_code = item["set_code"]
+                set_label = item["set_label"]
+                score_val = item["score"]
+
                 text = _format_ticket_message(set_code, set_label, ticket)
                 print(
-                    f"[TELEGRAM] Sending ticket {ticket.get('ticket_id')} from set {set_code} "
-                    f"with score={ticket.get('score')}"
+                    f"[TELEGRAM] Sending TOP#{rank} ticket {ticket.get('ticket_id')} "
+                    f"from set {set_code} with score={score_val:.1f}"
                 )
                 try:
                     send_message(
@@ -294,9 +364,10 @@ def main() -> None:
         if not sets_after:
             print("[TELEGRAM] No tickets after AI filter, nothing to send.")
 
-    print(f"[{datetime.utcnow().isoformat()}] Morning run DONE")
+    print(f"[{datetime.utcnow().isoformat()}] Morning run END")
     print("=" * 60)
 
 
 if __name__ == "__main__":
+    # Bitno: da se main stvarno pozove kada Actions radi `python -m cron_jobs.morning_run`
     main()

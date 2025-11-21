@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Naksir Autonomous Tickets Feed</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: #020617;
+        color: #e5e7eb;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+      header {
+        padding: 16px 24px;
+        border-bottom: 1px solid #111827;
+        background: radial-gradient(circle at top, #0f172a 0, #020617 60%);
+      }
+      h1 {
+        margin: 0;
+        font-size: 20px;
+        letter-spacing: 0.04em;
+      }
+      main {
+        flex: 1;
+        padding: 24px;
+        max-width: 960px;
+        width: 100%;
+        margin: 0 auto;
+      }
+      code {
+        background: rgba(15, 23, 42, 0.9);
+        padding: 4px 6px;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+      .card {
+        border-radius: 12px;
+        border: 1px solid #111827;
+        background: radial-gradient(circle at top left, #020617 0, #020617 60%);
+        padding: 16px 18px;
+        margin-bottom: 16px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border-radius: 999px;
+        padding: 3px 10px;
+        background: rgba(22, 163, 74, 0.08);
+        color: #bbf7d0;
+        font-size: 12px;
+      }
+      .small {
+        font-size: 13px;
+        color: #9ca3af;
+      }
+      a {
+        color: #22c55e;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Naksir Autonomous – Static Tickets Feed</h1>
+      <p class="small">
+        GitHub Pages endpoint used by Android apps and integrations.
+      </p>
+    </header>
+    <main>
+      <div class="card">
+        <div class="badge">Endpoints</div>
+        <p class="small">JSON feeds are available at:</p>
+        <ul class="small">
+          <li><code>/naksir-autonomous/tickets.json</code> – daily tickets</li>
+          <li><code>/naksir-autonomous/evaluation.json</code> – ticket results</li>
+        </ul>
+        <p class="small">Example links on this site:</p>
+        <ul class="small">
+          <li><a href="./tickets.json">./tickets.json</a></li>
+          <li><a href="./evaluation.json">./evaluation.json</a></li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="badge">Debug</div>
+        <p class="small">
+          If you see HTTP 404 for <code>tickets.json</code> or
+          <code>evaluation.json</code>, check that the GitHub Actions workflow
+          finished successfully and copied files from <code>outputs/</code> into
+          this <code>public/</code> folder.
+        </p>
+      </div>
+    </main>
+  </body>
+</html>

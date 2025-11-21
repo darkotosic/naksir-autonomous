@@ -13,6 +13,9 @@ export type Leg = {
   market_family: string; // "GOALS", "HT", ...
   pick: string;          // "Over 2.5 Goals"
   odds: number;
+
+  // OPTIONAL: AI in-depth analiza po meču (5–7 rečenica)
+  analysis?: string[];
 };
 
 export type Ticket = {

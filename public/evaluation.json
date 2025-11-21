@@ -1,0 +1,15 @@
+{
+  "date": "2025-11-21",
+  "tickets": [
+    {
+      "ticket_id": "SET_GOALS_MIX-1",
+      "status": "PENDING",
+      "legs": [
+        {
+          "fixture_id": 123,
+          "status": "PENDING"
+        }
+      ]
+    }
+  ]
+}

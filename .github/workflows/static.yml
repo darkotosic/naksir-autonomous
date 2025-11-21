@@ -1,50 +1,59 @@
-name: Naksir Autonomous Daily Run
+name: Naksir Autonomous Daily
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 * * *"   # 06:00 UTC daily
+    - cron: "0 6 * * *"
 
 permissions:
-  contents: write
+  contents: read
   pages: write
   id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      # 1. Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Setup Python
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3. Install dependencies
       - name: Install requirements
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+        run: pip install -r requirements.txt
 
-      # 4. Run autonomous backend pipeline
       - name: Run Naksir Autonomous Engine
         env:
+          API_FOOTBALL_BASE_URL: ${{ secrets.API_FOOTBALL_BASE_URL }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_MORNING_CHAT_ID: ${{ secrets.TELEGRAM_MORNING_CHAT_ID }}
         run: |
           echo "=== Running morning_run.py ==="
-          python -m cron_jobs.morning_run
+          python -m cron_jobs.morning_run || echo "Error in morning_run.py"
 
-      # 5. Prepare artifacts for GitHub Pages
-      - name: Upload public folder as artifact
+      - name: Ensure public directory
+        run: mkdir -p public
+
+      - name: Preview tickets.json
+        run: |
+          echo "=== public/tickets.json ==="
+          cat public/tickets.json || echo "tickets.json NOT FOUND"
+
+      - name: Upload artifact for GitHub Pages
         uses: actions/upload-pages-artifact@v3
         with:
-          path: public
+          path: ./public
 
   deploy:
     needs: build
