@@ -193,7 +193,6 @@ const s = StyleSheet.create({
     opacity: 0.95,
   },
   spacer: {
-    flex: 1,
-    minHeight: 40,
+    height: 32,
   },
 });
