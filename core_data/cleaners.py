@@ -53,23 +53,21 @@ def best_market_odds(bookmakers: list) -> dict:
         for market in b.get("bets", []):
             mname = (market.get("name") or "").strip()
 
-            
-    # Goals Over/Under 1st Half / First Half
-    if bn in {"goals over/under 1st half", "goals over/under first half"}:
-        parts = lv.split()
-        if len(parts) != 2:
-            return None
-        side, line = parts
-        if side == "over":
-            if line == "0.5":
-                return "HT_O05"
-            if line == "1.5":
-                return "HT_O15"
-        if side == "under":
-            if line == "1.5":
-                return "HT_U15"
-        return None
-# BTTS
+            # MATCH WINNER
+            if any(mname.startswith(x) for x in DOC_MARKETS["match_winner"]):
+                for item in market.get("values", []):
+                    lbl = (item.get("value") or "").strip()
+                    odds_best.setdefault("Match Winner", {})
+                    odds_best["Match Winner"][lbl] = float(item.get("odd") or 0)
+
+            # DOUBLE CHANCE
+            if any(mname.startswith(x) for x in DOC_MARKETS["double_chance"]):
+                for item in market.get("values", []):
+                    lbl = (item.get("value") or "").strip()
+                    odds_best.setdefault("Double Chance", {})
+                    odds_best["Double Chance"][lbl] = float(item.get("odd") or 0)
+
+            # BTTS
             if any(mname.startswith(x) for x in DOC_MARKETS["btts"]):
                 for item in market.get("values", []):
                     lbl = (item.get("value") or "").strip()
