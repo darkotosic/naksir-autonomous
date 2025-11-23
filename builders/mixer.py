@@ -15,15 +15,14 @@ LEGS_MAX_DEFAULT = 5
 MAX_FAMILY_PER_TICKET_DEFAULT = 2
 
 # Preferirane lige (možeš da proširiš po potrebi)
-ALLOWED_LEAGUES: Set[int] = {
-    39,   # England Premier League
-    140,  # Spain La Liga
-    135,  # Italy Serie A
-    78,   # Germany Bundesliga
-    61,   # France Ligue 1
-    88,   # Netherlands Eredivisie
-    203,  # Serbia SuperLiga
-}
+ALLOW_LIST: List[int] = [
+    2, 3, 913, 5, 536, 808, 960, 10, 667, 29, 30, 31, 32, 37, 33, 34, 848,
+    311, 310, 342, 218, 144, 315, 71, 169, 210, 346, 233, 39, 40, 41, 42,
+    703, 244, 245, 61, 62, 78, 79, 197, 271, 164, 323, 135, 136, 389, 88,
+    89, 408, 103, 104, 106, 94, 283, 235, 286, 287, 322, 140, 141, 113,
+    207, 208, 202, 203, 909, 268, 269, 270, 340,
+]
+ALLOW_SET: Set[int] = set(ALLOW_LIST)
 
 
 @dataclass
@@ -151,7 +150,7 @@ def _build_candidate_legs(
     for fx in fixtures or []:
         league = fx.get("league") or {}
         lid = league.get("id")
-        if lid is None or lid not in ALLOWED_LEAGUES:
+        if lid is None or lid not in ALLOW_SET:
             continue
 
         fixture_info = fx.get("fixture") or {}

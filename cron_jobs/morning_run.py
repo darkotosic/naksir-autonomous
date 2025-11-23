@@ -18,7 +18,6 @@ from outputs.pages_writer import write_tickets_json
 from outputs.telegram_bot import send_message
 from ai_engine.meta import (
     annotate_ticket_sets_with_score,
-    get_adaptive_min_score,
 )
 # In-depth AI analiza po legu
 from ai_engine.in_depth import attach_in_depth_analysis
@@ -117,14 +116,13 @@ def _format_ticket_message(set_code: str, set_label: str, ticket: Dict[str, Any]
     """
     ticket_id = ticket.get("ticket_id", "N/A")
     total_odds = float(ticket.get("total_odds", 0.0) or 0.0)
-    score = float(ticket.get("score", 0.0) or 0.0)
 
     lines: List[str] = []
     lines.append(f"🎫 {set_label} — Ticket {ticket_id}")
     lines.append(f"📅 {date.today().isoformat()}  |  Set: {set_code}")
     if total_odds > 0:
         lines.append(f"📈 Total odds: {total_odds:.2f}")
-    lines.append(f"🤖 AI score: {score:.1f}%")
+    lines.append("🤖 AI decision layer disabled — publishing all tickets.")
     lines.append("")
 
     for leg in ticket.get("legs", []):
@@ -249,75 +247,35 @@ def main() -> None:
     else:
         print("[AI] Skipping in-depth analysis (no all_data available).")
 
-    # 3c) Adaptivni AI filter
-    fixtures_count = len(fixtures)
-    MIN_SCORE = get_adaptive_min_score(
-        fixtures_count=fixtures_count,
-        raw_total_tickets=total_tickets_raw,
+    # 3c) AI decision layer disabled – publish everything
+    print(
+        "[AI] Decision layer disabled — skipping adaptive score filters and publishing all tickets."
     )
-    print(f"[AI] Adaptive MIN_SCORE={MIN_SCORE:.1f}")
-
-    filtered_sets: List[Dict[str, Any]] = []
+    fixtures_count = len(fixtures)
     drop_trace: List[Dict[str, Any]] = []
-    for s in ticket_sets.get("sets", []) or []:
-        tickets = s.get("tickets", [])
-        kept = []
-        for t in tickets:
-            score = float(t.get("score", 0.0) or 0.0)
-            if score >= MIN_SCORE:
-                kept.append(t)
-            else:
-                reason = (
-                    f"Score {score:.1f} below cutoff {MIN_SCORE:.1f}"
-                )
-                drop_trace.append(
-                    {
-                        "set": s.get("code"),
-                        "ticket": t.get("ticket_id"),
-                        "reason": reason,
-                        "raw_score": score,
-                    }
-                )
-                print(
-                    f"[FILTER] Dropped ticket {t.get('ticket_id')} from set {s.get('code')} "
-                    f"due to low score={score:.1f} (< {MIN_SCORE:.1f})"
-                )
-        if kept:
-            s2 = dict(s)
-            s2["tickets"] = kept
-            filtered_sets.append(s2)
-        else:
-            drop_trace.append(
-                {
-                    "set": s.get("code"),
-                    "ticket": None,
-                    "reason": "No tickets survived AI filter",
-                    "raw_score": None,
-                }
-            )
-
-    ticket_sets["sets"] = filtered_sets
+    ticket_sets["sets"] = ticket_sets.get("sets", []) or []
 
     sets_after = ticket_sets.get("sets", []) or []
     total_tickets_after = sum(len(s.get("tickets", [])) for s in sets_after)
     print(
-        f"[ENGINE] After AI filter (score >= {MIN_SCORE:.1f}) "
-        f"sets={len(sets_after)}, total tickets={total_tickets_after}"
+        f"[ENGINE] AI filter disabled | sets={len(sets_after)}, total tickets={total_tickets_after}"
     )
     for s in sets_after:
         print(
-            f"[ENGINE] Kept set {s.get('code')} | status={s.get('status')} | "
+            f"[ENGINE] Publishing set {s.get('code')} | status={s.get('status')} | "
             f"tickets={len(s.get('tickets', []))}"
         )
 
     if not sets_after:
-        print("[WARN] No ticket sets left after AI filter. tickets.json will be empty 'sets':[].")
+        print("[WARN] No ticket sets available to publish. tickets.json will be empty 'sets':[].")
 
     # Meta za frontend / Pages
     ticket_sets["meta"] = {
         "fixtures_count": fixtures_count,
         "odds_count": len(odds),
-        "min_score": MIN_SCORE,
+        "min_score": 0.0,
+        "ai_filter_enabled": False,
+        "ai_decision_layer": "disabled",
         "raw_sets": len(sets),
         "raw_total_tickets": total_tickets_raw,
         "sets_after_filter": len(sets_after),
@@ -325,6 +283,7 @@ def main() -> None:
         "generated_at": ticket_sets.get("generated_at"),
         "analysis_mode": ticket_sets.get("analysis_mode", "autonomous_v2"),
         "drop_trace": drop_trace,
+        "publish_url": "https://darkotosic.github.io/naksir-autonomous/tickets.json",
         "source_days": {
             "fixtures": fixtures_day.isoformat(),
             "odds": odds_day.isoformat(),
@@ -342,17 +301,20 @@ def main() -> None:
     # 4) Upis tickets.json za frontend / Pages (LAYER 4)
     try:
         write_tickets_json(ticket_sets)
-        print("[OUTPUT] tickets.json written to public/ directory.")
+        print(
+            "[OUTPUT] tickets.json written to public/ directory → "
+            "https://darkotosic.github.io/naksir-autonomous/tickets.json"
+        )
     except Exception as e:
         print(f"[ERROR] write_tickets_json failed: {e}")
 
     # 5) Tiketi na Telegram (ako je podešen chat id)
-    #    Šaljemo samo TOP 2 tiketa po AI score-u preko svih setova.
+    #    Objavljujemo prve tikete bez AI rangiranja.
     if TELEGRAM_MORNING_CHAT_ID and sets_after:
         MAX_TELEGRAM_TICKETS = 2
 
         print(
-            f"[TELEGRAM] Selecting up to {MAX_TELEGRAM_TICKETS} top-scoring tickets "
+            f"[TELEGRAM] Publishing up to {MAX_TELEGRAM_TICKETS} tickets (AI filter off) "
             f"for chat={TELEGRAM_MORNING_CHAT_ID}"
         )
 
@@ -369,15 +331,8 @@ def main() -> None:
             set_label = s.get("label", "N/A")
 
             for ticket in s.get("tickets", []):
-                raw_score = ticket.get("score")
-                try:
-                    score_val = float(raw_score) if raw_score is not None else 0.0
-                except (TypeError, ValueError):
-                    score_val = 0.0
-
                 candidates.append(
                     {
-                        "score": score_val,
                         "set_code": set_code,
                         "set_label": set_label,
                         "ticket": ticket,
@@ -387,20 +342,18 @@ def main() -> None:
         if not candidates:
             print("[TELEGRAM] No eligible tickets for Telegram after filtering.")
         else:
-            # Sortiraj po score silazno i uzmi samo prva 2
-            candidates.sort(key=lambda x: x["score"], reverse=True)
+            # Uzimamo po redosledu generisanja
             selected = candidates[:MAX_TELEGRAM_TICKETS]
 
             for rank, item in enumerate(selected, start=1):
                 ticket = item["ticket"]
                 set_code = item["set_code"]
                 set_label = item["set_label"]
-                score_val = item["score"]
 
                 text = _format_ticket_message(set_code, set_label, ticket)
                 print(
-                    f"[TELEGRAM] Sending TOP#{rank} ticket {ticket.get('ticket_id')} "
-                    f"from set {set_code} with score={score_val:.1f}"
+                    f"[TELEGRAM] Sending ticket {ticket.get('ticket_id')} "
+                    f"from set {set_code} (AI decision layer disabled)"
                 )
                 try:
                     send_message(

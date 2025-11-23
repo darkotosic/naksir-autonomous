@@ -2,19 +2,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 # Zadržavamo listu preferiranih liga radi kasnijeg ponderisanja ili specijalnih pravila,
 # ali je VIŠE NE KORISTIMO kao hard filter u is_fixture_playable (global pool).
-ALLOWED_LEAGUES: Set[int] = {
-    39,   # England Premier League
-    140,  # Spain La Liga
-    135,  # Italy Serie A
-    78,   # Germany Bundesliga
-    61,   # France Ligue 1
-    88,   # Netherlands Eredivisie
-    203,  # Serbia SuperLiga
-}
+ALLOW_LIST: List[int] = [
+    2, 3, 913, 5, 536, 808, 960, 10, 667, 29, 30, 31, 32, 37, 33, 34, 848,
+    311, 310, 342, 218, 144, 315, 71, 169, 210, 346, 233, 39, 40, 41, 42,
+    703, 244, 245, 61, 62, 78, 79, 197, 271, 164, 323, 135, 136, 389, 88,
+    89, 408, 103, 104, 106, 94, 283, 235, 286, 287, 322, 140, 141, 113,
+    207, 208, 202, 203, 909, 268, 269, 270, 340,
+]
 
 
 def parse_kickoff(fixture: Dict[str, Any]) -> Optional[str]:
