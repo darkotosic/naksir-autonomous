@@ -12,7 +12,8 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from core_data.ingest import fetch_all_data
-from core_data.cache import read_json, read_or_fallback
+from core_data.cache import read_json, read_or_fallback, write_json, CACHE_ROOT
+from core_data.aggregator import build_all_data
 from builders.engine import build_ticket_sets
 from outputs.pages_writer import write_tickets_json
 from outputs.telegram_bot import send_message
@@ -21,6 +22,7 @@ from ai_engine.meta import (
 )
 # In-depth AI analiza po legu
 from ai_engine.in_depth import attach_in_depth_analysis
+from pathlib import Path
 
 TELEGRAM_MORNING_CHAT_ID = os.getenv("TELEGRAM_MORNING_CHAT_ID", "").strip()
 
@@ -88,6 +90,57 @@ def _read_with_fallback(name: str, today: date) -> Tuple[Any, date]:
 
     print(f"[CACHE] {name} missing for {today.isoformat()} and previous 2 days.")
     return None, today
+
+def _load_all_for_all_data(day: date) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Load standings, team_stats and h2h payloads from cache for given day.
+
+    This is used as a fallback when all_data.json is missing so that we can
+    build it on the fly using the aggregation layer.
+    """
+    day_dir = CACHE_ROOT / day.isoformat()
+    standings_dir = day_dir / "standings"
+    stats_dir = day_dir / "stats"
+    h2h_dir = day_dir / "h2h"
+
+    standings: List[Dict[str, Any]] = []
+    team_stats: List[Dict[str, Any]] = []
+    h2h_list: List[Dict[str, Any]] = []
+
+    # Standings
+    if standings_dir.exists():
+        for fp in sorted(standings_dir.glob("*.json")):
+            try:
+                with fp.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    standings.append(data)
+            except Exception as e:
+                print(f"[WARN] Failed to load standings from {fp}: {e}")
+
+    # Team stats
+    if stats_dir.exists():
+        for fp in sorted(stats_dir.glob("*.json")):
+            try:
+                with fp.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    team_stats.append(data)
+            except Exception as e:
+                print(f"[WARN] Failed to load team stats from {fp}: {e}")
+
+    # H2H
+    if h2h_dir.exists():
+        for fp in sorted(h2h_dir.glob("*.json")):
+            try:
+                with fp.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    h2h_list.append(data)
+            except Exception as e:
+                print(f"[WARN] Failed to load h2h from {fp}: {e}")
+
+    return standings, team_stats, h2h_list
+
 
 
 def _preview_fixtures(fixtures: List[Dict[str, Any]], max_items: int = 5) -> None:
@@ -179,17 +232,39 @@ def main() -> None:
     if odds_raw is None:
         print("[ERROR] odds.json for today not found in cache. Aborting.")
         return
+
+    # Normalizuj fixtures i odds odmah, jer ih koristimo i za eventualnu
+    # on-the-fly izgradnju all_data.json.
+    fixtures = _normalize_items(fixtures_raw, "fixtures")
+    odds = _normalize_items(odds_raw, "odds")
+
     if all_data_raw is None:
-        print("[WARN] all_data.json for today not found in cache. In-depth analysis will be skipped.")
-        all_data: Dict[str, Any] = {}
+        print("[WARN] all_data.json for today not found in cache. Attempting to build on the fly.")
+        standings_list, team_stats_list, h2h_list = _load_all_for_all_data(fixtures_day)
+
+        if not standings_list and not team_stats_list and not h2h_list:
+            print("[WARN] No standings/stats/h2h data found in cache; in-depth analysis will be skipped.")
+            all_data: Dict[str, Any] = {}
+            all_data_day = fixtures_day
+        else:
+            try:
+                all_data = build_all_data(
+                    fixtures=fixtures,
+                    odds=odds,
+                    standings=standings_list,
+                    team_stats=team_stats_list,
+                    h2h=h2h_list,
+                )
+                write_json("all_data.json", all_data, day=fixtures_day)
+                all_data_day = fixtures_day
+                print(f"[INFO] Built all_data.json on the fly for {fixtures_day.isoformat()}.")
+            except Exception as e:
+                print(f"[ERROR] Failed to build all_data.json on the fly: {e}")
+                all_data = {}
     else:
         all_data = all_data_raw if isinstance(all_data_raw, dict) else {}
         if not all_data:
             print("[WARN] all_data.json is not a dict. In-depth analysis will be skipped.")
-
-    fixtures = _normalize_items(fixtures_raw, "fixtures")
-    odds = _normalize_items(odds_raw, "odds")
-
     print(
         f"[DATA] Fixtures count={len(fixtures)} (source day={fixtures_day}) | "
         f"Odds rows count={len(odds)} (source day={odds_day})"
