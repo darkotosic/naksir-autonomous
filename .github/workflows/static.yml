@@ -25,10 +25,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+
+      - name: Restore API cache (fixtures/odds/history)
+        id: cache-restore
+        uses: actions/cache@v4
+        with:
+          path: cache
+          key: naksir-cache-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            naksir-cache-${{ github.ref_name }}-
 
       - name: Install requirements
         run: pip install -r requirements.txt
