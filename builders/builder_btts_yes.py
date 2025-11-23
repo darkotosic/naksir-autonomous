@@ -10,7 +10,7 @@ from .common import (
     build_leg,
 )
 
-BET_NAME = "Both Teams to Score"
+BET_NAME = "Both Teams Score"
 VALUE_LABEL = "Yes"
 
 MARKET_CODE = "BTTS_YES"

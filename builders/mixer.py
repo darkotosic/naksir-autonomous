@@ -53,7 +53,7 @@ MARKETS: List[MarketConfig] = [
     MarketConfig(
         code="HT_O05",
         family="HT_GOALS",
-        bet_name="Goals Over/Under 1st Half",
+        bet_name="Goals Over/Under First Half",
         value_label="Over 0.5",
         pick_label="HT Over 0.5 Goals",
     ),
@@ -74,7 +74,7 @@ MARKETS: List[MarketConfig] = [
     MarketConfig(
         code="BTTS_YES",
         family="BTTS",
-        bet_name="Both Teams To Score",
+        bet_name="Both Teams Score",
         value_label="Yes",
         pick_label="Both Teams To Score – YES",
     ),
@@ -102,6 +102,7 @@ def _build_odds_index(odds_list: List[Dict[str, Any]]) -> Dict[int, List[Dict[st
     return index
 
 
+
 def _get_market_odds(
     odds_index: Dict[int, List[Dict[str, Any]]],
     fixture_id: int,
@@ -116,14 +117,24 @@ def _get_market_odds(
     """
     rows = odds_index.get(fixture_id) or []
     found: List[float] = []
+
+    bet_name_key = (bet_name or "").strip().lower()
+    label_key = (value_label or "").strip().lower()
+
     for r in rows:
-        if r.get("bet_name") == bet_name and r.get("label") == value_label:
-            odd_val = r.get("odd")
-            try:
-                if odd_val is not None:
-                    found.append(float(odd_val))
-            except (TypeError, ValueError):
-                continue
+        r_bet = (r.get("bet_name") or "").strip().lower()
+        r_label = (r.get("label") or "").strip().lower()
+        if r_bet != bet_name_key:
+            continue
+        if r_label != label_key:
+            continue
+        odd_val = r.get("odd")
+        try:
+            if odd_val is not None:
+                found.append(float(odd_val))
+        except (TypeError, ValueError):
+            continue
+
     if not found:
         return None
     return min(found)

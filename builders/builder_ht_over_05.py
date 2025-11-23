@@ -11,7 +11,7 @@ from .common import (
 )
 
 
-BET_NAME = "Goals Over/Under 1st Half"
+BET_NAME = "Goals Over/Under First Half"
 VALUE_LABEL = "Over 0.5"
 MARKET_CODE = "HT_O05"
 MARKET_FAMILY = "HT_GOALS"
