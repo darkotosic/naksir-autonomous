@@ -25,6 +25,67 @@ def _safe_response(raw: Any) -> List[Dict[str, Any]]:
 # FIXTURES
 # ---------------------------------------------------------------------------
 
+
+DOC_MARKETS = {
+    "match_winner": ["Match Winner", "1x2", "Full Time Result", "Result"],
+    "double_chance": ["Double Chance", "Chance Double"],
+    "btts": ["Both Teams To Score", "BTTS", "Goal/No Goal", "GG/NG"],
+    "over_under": ["Goals Over/Under", "Over/Under", "Total Goals", "Total Goals Over/Under"],
+    "team_goals_home": ["Home Team Total Goals"],
+    "team_goals_away": ["Away Team Total Goals"],
+    "ht_goals": ["1st Half Goals", "First Half Goals"],
+}
+
+
+def _normalize_ou_value(v: str) -> str:
+    v = v.replace(" ", "").replace("Goals", "")
+    if "Over" in v:
+        return "Over " + v.split("Over")[-1]
+    if "Under" in v:
+        return "Under " + v.split("Under")[-1]
+    return v
+
+
+def best_market_odds(bookmakers: list) -> dict:
+    odds_best: dict = {}
+
+    for b in bookmakers or []:
+        for market in b.get("bets", []):
+            mname = (market.get("name") or "").strip()
+
+            # BTTS
+            if any(mname.startswith(x) for x in DOC_MARKETS["btts"]):
+                for item in market.get("values", []):
+                    lbl = (item.get("value") or "").strip()
+                    low = lbl.lower()
+                    if low in ("yes", "gg", "goal"):
+                        key = "Yes"
+                    elif low in ("no", "ng", "nogoal"):
+                        key = "No"
+                    else:
+                        key = lbl
+                    odds_best.setdefault("BTTS", {})
+                    odds_best["BTTS"][key] = float(item.get("odd") or 0)
+
+            # OVER/UNDER
+            if any(mname.startswith(x) for x in DOC_MARKETS["over_under"]):
+                for item in market.get("values", []):
+                    lbl = _normalize_ou_value(item.get("value") or "")
+                    odds_best.setdefault("Over/Under", {})
+                    odds_best["Over/Under"][lbl] = float(item.get("odd") or 0)
+
+            # HT GOALS
+            if any(mname.startswith(x) for x in DOC_MARKETS["ht_goals"]):
+                for item in market.get("values", []):
+                    lbl = _normalize_ou_value(item.get("value") or "")
+                    odds_best.setdefault("HT_Over/Under", {})
+                    odds_best["HT_Over/Under"][lbl] = float(item.get("odd") or 0)
+
+    return odds_best
+
+
+
+
 def clean_fixtures(raw: Any) -> List[Dict[str, Any]]:
     response = _safe_response(raw)
     cleaned: List[Dict[str, Any]] = []
