@@ -54,3 +54,11 @@ def build_ht_over_05_legs(
 
     legs_sorted = sorted(legs, key=lambda x: (x["kickoff"], -x["odds"]))
     return legs_sorted[:max_legs]
+
+
+def extract_odds(odds_best: dict):
+    try:
+        return float(odds_best.get("HT_Over/Under", {}).get("Over 0.5"))
+    except Exception:
+        return None
+
