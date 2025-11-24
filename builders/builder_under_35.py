@@ -54,3 +54,11 @@ def build_under_35_legs(
 
     legs_sorted = sorted(legs, key=lambda x: (x["kickoff"], -x["odds"]))
     return legs_sorted[:max_legs]
+
+
+def extract_odds(odds_best: dict):
+    try:
+        return float(odds_best.get("Over/Under", {}).get("Under 3.5"))
+    except Exception:
+        return None
+

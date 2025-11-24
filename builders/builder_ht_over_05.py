@@ -11,7 +11,7 @@ from .common import (
 )
 
 
-BET_NAME = "Goals Over/Under 1st Half"
+BET_NAME = "Goals Over/Under First Half"
 VALUE_LABEL = "Over 0.5"
 MARKET_CODE = "HT_O05"
 MARKET_FAMILY = "HT_GOALS"
@@ -54,3 +54,11 @@ def build_ht_over_05_legs(
 
     legs_sorted = sorted(legs, key=lambda x: (x["kickoff"], -x["odds"]))
     return legs_sorted[:max_legs]
+
+
+def extract_odds(odds_best: dict):
+    try:
+        return float(odds_best.get("HT_Over/Under", {}).get("Over 0.5"))
+    except Exception:
+        return None
+

@@ -15,15 +15,14 @@ LEGS_MAX_DEFAULT = 5
 MAX_FAMILY_PER_TICKET_DEFAULT = 2
 
 # Preferirane lige (možeš da proširiš po potrebi)
-ALLOWED_LEAGUES: Set[int] = {
-    39,   # England Premier League
-    140,  # Spain La Liga
-    135,  # Italy Serie A
-    78,   # Germany Bundesliga
-    61,   # France Ligue 1
-    88,   # Netherlands Eredivisie
-    203,  # Serbia SuperLiga
-}
+ALLOW_LIST: List[int] = [
+    2, 3, 913, 5, 536, 808, 960, 10, 667, 29, 30, 31, 32, 37, 33, 34, 848,
+    311, 310, 342, 218, 144, 315, 71, 169, 210, 346, 233, 39, 40, 41, 42,
+    703, 244, 245, 61, 62, 78, 79, 197, 271, 164, 323, 135, 136, 389, 88,
+    89, 408, 103, 104, 106, 94, 283, 235, 286, 287, 322, 140, 141, 113,
+    207, 208, 202, 203, 909, 268, 269, 270, 340,
+]
+ALLOW_SET: Set[int] = set(ALLOW_LIST)
 
 
 @dataclass
@@ -54,7 +53,7 @@ MARKETS: List[MarketConfig] = [
     MarketConfig(
         code="HT_O05",
         family="HT_GOALS",
-        bet_name="Goals Over/Under 1st Half",
+        bet_name="Goals Over/Under First Half",
         value_label="Over 0.5",
         pick_label="HT Over 0.5 Goals",
     ),
@@ -75,7 +74,7 @@ MARKETS: List[MarketConfig] = [
     MarketConfig(
         code="BTTS_YES",
         family="BTTS",
-        bet_name="Both Teams To Score",
+        bet_name="Both Teams Score",
         value_label="Yes",
         pick_label="Both Teams To Score – YES",
     ),
@@ -103,6 +102,7 @@ def _build_odds_index(odds_list: List[Dict[str, Any]]) -> Dict[int, List[Dict[st
     return index
 
 
+
 def _get_market_odds(
     odds_index: Dict[int, List[Dict[str, Any]]],
     fixture_id: int,
@@ -117,14 +117,24 @@ def _get_market_odds(
     """
     rows = odds_index.get(fixture_id) or []
     found: List[float] = []
+
+    bet_name_key = (bet_name or "").strip().lower()
+    label_key = (value_label or "").strip().lower()
+
     for r in rows:
-        if r.get("bet_name") == bet_name and r.get("label") == value_label:
-            odd_val = r.get("odd")
-            try:
-                if odd_val is not None:
-                    found.append(float(odd_val))
-            except (TypeError, ValueError):
-                continue
+        r_bet = (r.get("bet_name") or "").strip().lower()
+        r_label = (r.get("label") or "").strip().lower()
+        if r_bet != bet_name_key:
+            continue
+        if r_label != label_key:
+            continue
+        odd_val = r.get("odd")
+        try:
+            if odd_val is not None:
+                found.append(float(odd_val))
+        except (TypeError, ValueError):
+            continue
+
     if not found:
         return None
     return min(found)
@@ -151,7 +161,7 @@ def _build_candidate_legs(
     for fx in fixtures or []:
         league = fx.get("league") or {}
         lid = league.get("id")
-        if lid is None or lid not in ALLOWED_LEAGUES:
+        if lid is None or lid not in ALLOW_SET:
             continue
 
         fixture_info = fx.get("fixture") or {}

@@ -1,10 +1,12 @@
 name: Naksir Autonomous Daily
 
 on:
+  # ručno pokretanje iz Actions taba
   workflow_dispatch:
+
+  # automatski run svaki dan u 06:00 UTC (~07:00 CET)
   schedule:
-    - cron: "0 6 * * *" # 06:00 ingest
-    - cron: "1 6 * * *" # 06:01 build/deploy
+    - cron: "0 6 * * *"
 
 permissions:
   contents: read
@@ -16,96 +18,51 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ingest:
-    name: Ingest data (06:00)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-
-      - name: Install requirements
-        run: pip install -r requirements.txt
-
-      - name: Run ingest + readiness check
-        env:
-          API_FOOTBALL_BASE_URL: ${{ secrets.API_FOOTBALL_BASE_URL }}
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
-        run: |
-          echo "=== Running core_data.ingest (ingest only) ==="
-          python -m core_data.ingest || echo "ingest script returned non-zero"
-
-      - name: Upload cache snapshot
-        uses: actions/upload-artifact@v4
-        with:
-          name: daily-cache
-          path: cache
-          if-no-files-found: warn
-
   build:
-    name: Build tickets + Pages (06:01)
-    needs: ingest
-    if: always()
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Set up GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
-      - name: Cache pip
+      - name: Restore API cache (fixtures/odds/history)
+        id: cache-restore
         uses: actions/cache@v4
         with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          path: cache
+          key: naksir-cache-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            naksir-cache-${{ github.ref_name }}-
 
       - name: Install requirements
         run: pip install -r requirements.txt
-
-      - name: Restore ingest cache artifact (fail-safe)
-        uses: actions/download-artifact@v4
-        with:
-          name: daily-cache
-          path: cache
-        continue-on-error: true
 
       - name: Run Naksir Autonomous Engine
         env:
           API_FOOTBALL_BASE_URL: ${{ secrets.API_FOOTBALL_BASE_URL }}
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_MORNING_CHAT_ID: ${{ secrets.TELEGRAM_MORNING_CHAT_ID }}
         run: |
-          echo "=== Running morning_run.py (with fallback cache) ==="
-          python -m cron_jobs.morning_run || echo "Error in morning_run.py"
+          python -m cron_jobs.morning_run
 
-      - name: Ensure public directory
-        run: mkdir -p public
-
-      - name: Preview tickets.json
+      - name: Show generated tickets.json
         run: |
           echo "=== public/tickets.json ==="
-          cat public/tickets.json || echo "tickets.json NOT FOUND"
+          cat public/tickets.json
 
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload artifact for GitHub Pages
+      - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./public

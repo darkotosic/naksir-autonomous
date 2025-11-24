@@ -12,16 +12,17 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from core_data.ingest import fetch_all_data
-from core_data.cache import read_json, read_or_fallback
+from core_data.cache import read_json, read_or_fallback, write_json, CACHE_ROOT
+from core_data.aggregator import build_all_data
 from builders.engine import build_ticket_sets
 from outputs.pages_writer import write_tickets_json
 from outputs.telegram_bot import send_message
 from ai_engine.meta import (
     annotate_ticket_sets_with_score,
-    get_adaptive_min_score,
 )
 # In-depth AI analiza po legu
 from ai_engine.in_depth import attach_in_depth_analysis
+from pathlib import Path
 
 TELEGRAM_MORNING_CHAT_ID = os.getenv("TELEGRAM_MORNING_CHAT_ID", "").strip()
 
@@ -90,6 +91,57 @@ def _read_with_fallback(name: str, today: date) -> Tuple[Any, date]:
     print(f"[CACHE] {name} missing for {today.isoformat()} and previous 2 days.")
     return None, today
 
+def _load_all_for_all_data(day: date) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Load standings, team_stats and h2h payloads from cache for given day.
+
+    This is used as a fallback when all_data.json is missing so that we can
+    build it on the fly using the aggregation layer.
+    """
+    day_dir = CACHE_ROOT / day.isoformat()
+    standings_dir = day_dir / "standings"
+    stats_dir = day_dir / "stats"
+    h2h_dir = day_dir / "h2h"
+
+    standings: List[Dict[str, Any]] = []
+    team_stats: List[Dict[str, Any]] = []
+    h2h_list: List[Dict[str, Any]] = []
+
+    # Standings
+    if standings_dir.exists():
+        for fp in sorted(standings_dir.glob("*.json")):
+            try:
+                with fp.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    standings.append(data)
+            except Exception as e:
+                print(f"[WARN] Failed to load standings from {fp}: {e}")
+
+    # Team stats
+    if stats_dir.exists():
+        for fp in sorted(stats_dir.glob("*.json")):
+            try:
+                with fp.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    team_stats.append(data)
+            except Exception as e:
+                print(f"[WARN] Failed to load team stats from {fp}: {e}")
+
+    # H2H
+    if h2h_dir.exists():
+        for fp in sorted(h2h_dir.glob("*.json")):
+            try:
+                with fp.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    h2h_list.append(data)
+            except Exception as e:
+                print(f"[WARN] Failed to load h2h from {fp}: {e}")
+
+    return standings, team_stats, h2h_list
+
+
 
 def _preview_fixtures(fixtures: List[Dict[str, Any]], max_items: int = 5) -> None:
     print(f"[PREVIEW] Fixtures sample (up to {max_items}):")
@@ -117,14 +169,13 @@ def _format_ticket_message(set_code: str, set_label: str, ticket: Dict[str, Any]
     """
     ticket_id = ticket.get("ticket_id", "N/A")
     total_odds = float(ticket.get("total_odds", 0.0) or 0.0)
-    score = float(ticket.get("score", 0.0) or 0.0)
 
     lines: List[str] = []
     lines.append(f"🎫 {set_label} — Ticket {ticket_id}")
     lines.append(f"📅 {date.today().isoformat()}  |  Set: {set_code}")
     if total_odds > 0:
         lines.append(f"📈 Total odds: {total_odds:.2f}")
-    lines.append(f"🤖 AI score: {score:.1f}%")
+    lines.append("🤖 AI decision layer disabled — publishing all tickets.")
     lines.append("")
 
     for leg in ticket.get("legs", []):
@@ -181,17 +232,39 @@ def main() -> None:
     if odds_raw is None:
         print("[ERROR] odds.json for today not found in cache. Aborting.")
         return
+
+    # Normalizuj fixtures i odds odmah, jer ih koristimo i za eventualnu
+    # on-the-fly izgradnju all_data.json.
+    fixtures = _normalize_items(fixtures_raw, "fixtures")
+    odds = _normalize_items(odds_raw, "odds")
+
     if all_data_raw is None:
-        print("[WARN] all_data.json for today not found in cache. In-depth analysis will be skipped.")
-        all_data: Dict[str, Any] = {}
+        print("[WARN] all_data.json for today not found in cache. Attempting to build on the fly.")
+        standings_list, team_stats_list, h2h_list = _load_all_for_all_data(fixtures_day)
+
+        if not standings_list and not team_stats_list and not h2h_list:
+            print("[WARN] No standings/stats/h2h data found in cache; in-depth analysis will be skipped.")
+            all_data: Dict[str, Any] = {}
+            all_data_day = fixtures_day
+        else:
+            try:
+                all_data = build_all_data(
+                    fixtures=fixtures,
+                    odds=odds,
+                    standings=standings_list,
+                    team_stats=team_stats_list,
+                    h2h=h2h_list,
+                )
+                write_json("all_data.json", all_data, day=fixtures_day)
+                all_data_day = fixtures_day
+                print(f"[INFO] Built all_data.json on the fly for {fixtures_day.isoformat()}.")
+            except Exception as e:
+                print(f"[ERROR] Failed to build all_data.json on the fly: {e}")
+                all_data = {}
     else:
         all_data = all_data_raw if isinstance(all_data_raw, dict) else {}
         if not all_data:
             print("[WARN] all_data.json is not a dict. In-depth analysis will be skipped.")
-
-    fixtures = _normalize_items(fixtures_raw, "fixtures")
-    odds = _normalize_items(odds_raw, "odds")
-
     print(
         f"[DATA] Fixtures count={len(fixtures)} (source day={fixtures_day}) | "
         f"Odds rows count={len(odds)} (source day={odds_day})"
@@ -249,75 +322,35 @@ def main() -> None:
     else:
         print("[AI] Skipping in-depth analysis (no all_data available).")
 
-    # 3c) Adaptivni AI filter
-    fixtures_count = len(fixtures)
-    MIN_SCORE = get_adaptive_min_score(
-        fixtures_count=fixtures_count,
-        raw_total_tickets=total_tickets_raw,
+    # 3c) AI decision layer disabled – publish everything
+    print(
+        "[AI] Decision layer disabled — skipping adaptive score filters and publishing all tickets."
     )
-    print(f"[AI] Adaptive MIN_SCORE={MIN_SCORE:.1f}")
-
-    filtered_sets: List[Dict[str, Any]] = []
+    fixtures_count = len(fixtures)
     drop_trace: List[Dict[str, Any]] = []
-    for s in ticket_sets.get("sets", []) or []:
-        tickets = s.get("tickets", [])
-        kept = []
-        for t in tickets:
-            score = float(t.get("score", 0.0) or 0.0)
-            if score >= MIN_SCORE:
-                kept.append(t)
-            else:
-                reason = (
-                    f"Score {score:.1f} below cutoff {MIN_SCORE:.1f}"
-                )
-                drop_trace.append(
-                    {
-                        "set": s.get("code"),
-                        "ticket": t.get("ticket_id"),
-                        "reason": reason,
-                        "raw_score": score,
-                    }
-                )
-                print(
-                    f"[FILTER] Dropped ticket {t.get('ticket_id')} from set {s.get('code')} "
-                    f"due to low score={score:.1f} (< {MIN_SCORE:.1f})"
-                )
-        if kept:
-            s2 = dict(s)
-            s2["tickets"] = kept
-            filtered_sets.append(s2)
-        else:
-            drop_trace.append(
-                {
-                    "set": s.get("code"),
-                    "ticket": None,
-                    "reason": "No tickets survived AI filter",
-                    "raw_score": None,
-                }
-            )
-
-    ticket_sets["sets"] = filtered_sets
+    ticket_sets["sets"] = ticket_sets.get("sets", []) or []
 
     sets_after = ticket_sets.get("sets", []) or []
     total_tickets_after = sum(len(s.get("tickets", [])) for s in sets_after)
     print(
-        f"[ENGINE] After AI filter (score >= {MIN_SCORE:.1f}) "
-        f"sets={len(sets_after)}, total tickets={total_tickets_after}"
+        f"[ENGINE] AI filter disabled | sets={len(sets_after)}, total tickets={total_tickets_after}"
     )
     for s in sets_after:
         print(
-            f"[ENGINE] Kept set {s.get('code')} | status={s.get('status')} | "
+            f"[ENGINE] Publishing set {s.get('code')} | status={s.get('status')} | "
             f"tickets={len(s.get('tickets', []))}"
         )
 
     if not sets_after:
-        print("[WARN] No ticket sets left after AI filter. tickets.json will be empty 'sets':[].")
+        print("[WARN] No ticket sets available to publish. tickets.json will be empty 'sets':[].")
 
     # Meta za frontend / Pages
     ticket_sets["meta"] = {
         "fixtures_count": fixtures_count,
         "odds_count": len(odds),
-        "min_score": MIN_SCORE,
+        "min_score": 0.0,
+        "ai_filter_enabled": False,
+        "ai_decision_layer": "disabled",
         "raw_sets": len(sets),
         "raw_total_tickets": total_tickets_raw,
         "sets_after_filter": len(sets_after),
@@ -325,6 +358,7 @@ def main() -> None:
         "generated_at": ticket_sets.get("generated_at"),
         "analysis_mode": ticket_sets.get("analysis_mode", "autonomous_v2"),
         "drop_trace": drop_trace,
+        "publish_url": "https://darkotosic.github.io/naksir-autonomous/tickets.json",
         "source_days": {
             "fixtures": fixtures_day.isoformat(),
             "odds": odds_day.isoformat(),
@@ -342,17 +376,20 @@ def main() -> None:
     # 4) Upis tickets.json za frontend / Pages (LAYER 4)
     try:
         write_tickets_json(ticket_sets)
-        print("[OUTPUT] tickets.json written to public/ directory.")
+        print(
+            "[OUTPUT] tickets.json written to public/ directory → "
+            "https://darkotosic.github.io/naksir-autonomous/tickets.json"
+        )
     except Exception as e:
         print(f"[ERROR] write_tickets_json failed: {e}")
 
     # 5) Tiketi na Telegram (ako je podešen chat id)
-    #    Šaljemo samo TOP 2 tiketa po AI score-u preko svih setova.
+    #    Objavljujemo prve tikete bez AI rangiranja.
     if TELEGRAM_MORNING_CHAT_ID and sets_after:
         MAX_TELEGRAM_TICKETS = 2
 
         print(
-            f"[TELEGRAM] Selecting up to {MAX_TELEGRAM_TICKETS} top-scoring tickets "
+            f"[TELEGRAM] Publishing up to {MAX_TELEGRAM_TICKETS} tickets (AI filter off) "
             f"for chat={TELEGRAM_MORNING_CHAT_ID}"
         )
 
@@ -369,15 +406,8 @@ def main() -> None:
             set_label = s.get("label", "N/A")
 
             for ticket in s.get("tickets", []):
-                raw_score = ticket.get("score")
-                try:
-                    score_val = float(raw_score) if raw_score is not None else 0.0
-                except (TypeError, ValueError):
-                    score_val = 0.0
-
                 candidates.append(
                     {
-                        "score": score_val,
                         "set_code": set_code,
                         "set_label": set_label,
                         "ticket": ticket,
@@ -387,20 +417,18 @@ def main() -> None:
         if not candidates:
             print("[TELEGRAM] No eligible tickets for Telegram after filtering.")
         else:
-            # Sortiraj po score silazno i uzmi samo prva 2
-            candidates.sort(key=lambda x: x["score"], reverse=True)
+            # Uzimamo po redosledu generisanja
             selected = candidates[:MAX_TELEGRAM_TICKETS]
 
             for rank, item in enumerate(selected, start=1):
                 ticket = item["ticket"]
                 set_code = item["set_code"]
                 set_label = item["set_label"]
-                score_val = item["score"]
 
                 text = _format_ticket_message(set_code, set_label, ticket)
                 print(
-                    f"[TELEGRAM] Sending TOP#{rank} ticket {ticket.get('ticket_id')} "
-                    f"from set {set_code} with score={score_val:.1f}"
+                    f"[TELEGRAM] Sending ticket {ticket.get('ticket_id')} "
+                    f"from set {set_code} (AI decision layer disabled)"
                 )
                 try:
                     send_message(

@@ -10,7 +10,7 @@ from .common import (
     build_leg,
 )
 
-BET_NAME = "Both Teams to Score"
+BET_NAME = "Both Teams Score"
 VALUE_LABEL = "Yes"
 
 MARKET_CODE = "BTTS_YES"
@@ -58,3 +58,11 @@ def build_btts_yes_legs(
     # sortiraj po kickoff-u (rastuce) pa po kvoti (opadajuće)
     legs_sorted = sorted(legs, key=lambda x: (x["kickoff"], -x["odds"]))
     return legs_sorted[:max_legs]
+
+
+def extract_odds(odds_best: dict):
+    try:
+        return float(odds_best.get("BTTS", {}).get("Yes"))
+    except Exception:
+        return None
+

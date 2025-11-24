@@ -57,3 +57,11 @@ def build_over_15_legs(
     # sortiraj po kickoff-u pa po kvoti (veća kvota prvo)
     legs_sorted = sorted(legs, key=lambda x: (x["kickoff"], -x["odds"]))
     return legs_sorted[:max_legs]
+
+
+def extract_odds(odds_best: dict):
+    try:
+        return float(odds_best.get("Over/Under", {}).get("Over 1.5"))
+    except Exception:
+        return None
+

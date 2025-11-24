@@ -1,1 +1,1 @@
-ECHO is on.
+"""Backend API initialization."""
