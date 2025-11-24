@@ -1,96 +1,115 @@
 # core_data/cleaners.py
 from __future__ import annotations
-
-from typing import Any, Dict, List, Optional
-
-
-# ---------------------------------------------------------------------------
-# Helper: standardize access to raw["response"]
-# ---------------------------------------------------------------------------
-
-def _safe_response(raw: Any) -> List[Dict[str, Any]]:
-    if raw is None:
-        return []
-    if isinstance(raw, dict):
-        resp = raw.get("response")
-        if isinstance(resp, list):
-            return resp
-        return []
-    if isinstance(raw, list):
-        return raw
-    return []
+from typing import Any, Dict, List
+import json
 
 
-# ---------------------------------------------------------------------------
-# FIXTURES
-# ---------------------------------------------------------------------------
-
-
+# -----------------------------------------------------------------------
+# Canonical markets used across all builders and odds normalization
+# -----------------------------------------------------------------------
 DOC_MARKETS = {
-    "match_winner": ["Match Winner", "1x2", "Full Time Result", "Result"],
-    "double_chance": ["Double Chance", "Chance Double"],
-    "btts": ["Both Teams To Score", "BTTS", "Goal/No Goal", "GG/NG"],
-    "over_under": ["Goals Over/Under", "Over/Under", "Total Goals", "Total Goals Over/Under"],
-    "team_goals_home": ["Home Team Total Goals"],
-    "team_goals_away": ["Away Team Total Goals"],
-    "ht_goals": ["1st Half Goals", "First Half Goals"],
+    "btts": [
+        "Both Teams To Score",
+        "BTTS",
+        "Goal",
+        "GG",
+        "Team to Score",
+    ],
+    "over_under": [
+        "Over/Under",
+        "Total Goals",
+        "Goals Over/Under",
+        "O/U",
+        "Totals",
+    ],
+    "ht_goals": [
+        "HT Over/Under",
+        "Half Time Over/Under",
+        "First Half Goals",
+        "1st Half - Over/Under",
+    ],
 }
 
 
-def _normalize_ou_value(v: str) -> str:
-    v = v.replace(" ", "").replace("Goals", "")
-    if "Over" in v:
-        return "Over " + v.split("Over")[-1]
-    if "Under" in v:
-        return "Under " + v.split("Under")[-1]
-    return v
+# -----------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------
+def _safe_response(raw: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
+    """Return API-Football 'response' safely."""
+    return raw.get(key) or raw.get("response") or []
 
 
+def _normalize_ou_value(txt: str) -> str:
+    """
+    Normalizes Over/Under goal value string into canonical form:
+    "Over 2.5", "Under 1.5", etc.
+    """
+    if not txt:
+        return txt
+    t = txt.strip().replace(" ", "")
+    if "Over" in txt or "over" in txt:
+        val = txt.lower().replace("over", "").strip()
+        return f"Over {val}"
+    if "Under" in txt or "under" in txt:
+        val = txt.lower().replace("under", "").strip()
+        return f"Under {val}"
+    return txt
+
+
+# -----------------------------------------------------------------------
+# BEST MARKET ODDS (canonical)
+# FIXED — now fully indented and valid Python
+# -----------------------------------------------------------------------
 def best_market_odds(bookmakers: list) -> dict:
+    """
+    Extracts best odds for canonical markets:
+    - BTTS {Yes/No}
+    - Over/Under {Over X.X, Under X.X}
+    - HT Over/Under {Over X.X, Under X.X}
+
+    Results example:
+    {
+        "BTTS": {"Yes": 1.72, "No": 2.05},
+        "Over/Under": {"Over 2.5": 1.85, "Under 2.5": 1.95},
+        "HT_Over/Under": {"Over 0.5": 1.30, "Under 0.5": 3.40},
+    }
+    """
     odds_best: dict = {}
 
-    for b in bookmakers or []:
-        for market in b.get("bets", []):
+    for bm in bookmakers or []:
+        for market in bm.get("bets", []):
             mname = (market.get("name") or "").strip()
 
-            
-    # Goals Over/Under 1st Half / First Half
-    if bn in {"goals over/under 1st half", "goals over/under first half"}:
-        parts = lv.split()
-        if len(parts) != 2:
-            return None
-        side, line = parts
-        if side == "over":
-            if line == "0.5":
-                return "HT_O05"
-            if line == "1.5":
-                return "HT_O15"
-        if side == "under":
-            if line == "1.5":
-                return "HT_U15"
-        return None
-# BTTS
+            # -------------------------
+            # BTTS
+            # -------------------------
             if any(mname.startswith(x) for x in DOC_MARKETS["btts"]):
                 for item in market.get("values", []):
-                    lbl = (item.get("value") or "").strip()
-                    low = lbl.lower()
+                    lbl_raw = (item.get("value") or "").strip()
+                    low = lbl_raw.lower()
+
                     if low in ("yes", "gg", "goal"):
                         key = "Yes"
                     elif low in ("no", "ng", "nogoal"):
                         key = "No"
                     else:
-                        key = lbl
+                        key = lbl_raw
+
                     odds_best.setdefault("BTTS", {})
                     odds_best["BTTS"][key] = float(item.get("odd") or 0)
 
-            # OVER/UNDER
+            # -------------------------
+            # FT Over/Under
+            # -------------------------
             if any(mname.startswith(x) for x in DOC_MARKETS["over_under"]):
                 for item in market.get("values", []):
                     lbl = _normalize_ou_value(item.get("value") or "")
                     odds_best.setdefault("Over/Under", {})
                     odds_best["Over/Under"][lbl] = float(item.get("odd") or 0)
 
-            # HT GOALS
+            # -------------------------
+            # HT Over/Under
+            # -------------------------
             if any(mname.startswith(x) for x in DOC_MARKETS["ht_goals"]):
                 for item in market.get("values", []):
                     lbl = _normalize_ou_value(item.get("value") or "")
@@ -100,240 +119,153 @@ def best_market_odds(bookmakers: list) -> dict:
     return odds_best
 
 
+# -----------------------------------------------------------------------
+# CLEAN FIXTURES
+# -----------------------------------------------------------------------
+def clean_fixtures(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    fixtures = []
+    for fx in _safe_response(raw, "response"):
+        fixture_id = fx.get("fixture", {}).get("id")
+        league = fx.get("league", {})
+        teams = fx.get("teams", {})
+        fixtures.append(
+            {
+                "fixture_id": fixture_id,
+                "kickoff": fx.get("fixture", {}).get("date"),
+                "league_id": league.get("id"),
+                "league_name": league.get("name"),
+                "league_country": league.get("country"),
+                "home": teams.get("home", {}).get("name"),
+                "away": teams.get("away", {}).get("name"),
+            }
+        )
+    return fixtures
 
 
-def clean_fixtures(raw: Any) -> List[Dict[str, Any]]:
-    response = _safe_response(raw)
-    cleaned: List[Dict[str, Any]] = []
-
-    for item in response:
-        if not isinstance(item, dict):
-            continue
-
-        fixture = item.get("fixture") or {}
-        league = item.get("league") or {}
-        teams = item.get("teams") or {}
-
-        fid = fixture.get("id")
-        lid = league.get("id")
-        home = (teams.get("home") or {}).get("name")
-        away = (teams.get("away") or {}).get("name")
-
-        if fid is None or lid is None or not home or not away:
-            continue
-
-        status = (fixture.get("status") or {}).get("short")
-        if status in {"FT", "AET", "PEN", "CANC", "ABD", "PST", "AWD", "WO"}:
-            continue
-
-        cleaned.append(item)
-
-    return cleaned
-
-
-# ---------------------------------------------------------------------------
-# MARKET MAPPING FOR ODDS
-# ---------------------------------------------------------------------------
-
-def _map_market(bet_name: Any, label: Any) -> Optional[str]:
+# -----------------------------------------------------------------------
+# MAP ODDS MARKET → canonical code inside odds dictionary
+# -----------------------------------------------------------------------
+def _map_market(name: str, value: str) -> str | None:
     """
-    bet_name i label mogu biti int / float / bilo šta iz API-ja,
-    zato ih OBAVEZNO kastujemo u string pre strip/lower.
+    Return canonical market code like:
+    O15, O25, U35, HT_O05, BTTS_YES, BTTS_NO, DC_1X...
     """
-    bn = str(bet_name or "").strip().lower()
-    lv = str(label or "").strip().lower()
-
-    # Match Winner
-    if bn == "match winner":
-        if lv in {"home", "1"}:
-            return "HOME"
-        if lv in {"draw", "x"}:
-            return "DRAW"
-        if lv in {"away", "2"}:
-            return "AWAY"
+    if not name:
         return None
 
-    # Double Chance
-    if bn == "double chance":
-        if lv in {"1x", "1 or draw"}:
-            return "1X"
-        if lv in {"x2", "2x", "draw or 2"}:
-            return "X2"
-        if lv in {"12", "1 or 2"}:
-            return "12"
-        return None
+    n = name.lower()
 
-    # Goals Over/Under
-    if bn == "goals over/under":
-        parts = lv.split()
-        if len(parts) != 2:
-            return None
-        side, line = parts
-        if side == "over":
-            if line == "0.5":
-                return "O05"
-            if line == "1.5":
-                return "O15"
-            if line == "2.5":
-                return "O25"
-            if line == "3.5":
-                return "O35"
-        if side == "under":
-            if line == "2.5":
-                return "U25"
-            if line == "3.5":
-                return "U35"
-        return None
-
-    # First Half Over 0.5
-    if ("1st half" in bn and "over" in lv and "0.5" in lv):
-        return "HT_O05"
-
-    # BTTS
-    if "both teams to score" in bn or "both teams score" in bn or "btts" in bn:
-        if lv == "yes":
+    if "both teams" in n or "btts" in n:
+        v = value.lower()
+        if v in ("yes", "gg", "goal"):
             return "BTTS_YES"
-        if lv == "no":
+        if v in ("no", "ng", "nogoal"):
             return "BTTS_NO"
-        return None
+
+    if "over" in n and value:
+        try:
+            g = float(value)
+            if abs(g - 1.5) < 0.01:
+                return "O15"
+            if abs(g - 2.5) < 0.01:
+                return "O25"
+            if abs(g - 3.5) < 0.01:
+                return "O35"
+        except:
+            pass
+
+    if "under" in n and value:
+        try:
+            g = float(value)
+            if abs(g - 3.5) < 0.01:
+                return "U35"
+        except:
+            pass
+
+    if "half" in n or "ht" in n:
+        if "over" in n and value:
+            try:
+                g = float(value)
+                if abs(g - 0.5) < 0.01:
+                    return "HT_O05"
+            except:
+                pass
+
+    if "double chance" in n or "dc" in n:
+        vl = value.lower()
+        if vl == "1x":
+            return "DC_1X"
+        if vl == "x2":
+            return "DC_X2"
 
     return None
 
 
-# ---------------------------------------------------------------------------
-# ODDS
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------
+# CLEAN ODDS
+# -----------------------------------------------------------------------
+def clean_odds(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    cleaned = []
+    for ox in _safe_response(raw, "response"):
+        fixture_id = ox.get("fixture", {}).get("id")
+        bookmakers = ox.get("bookmakers", [])
+        full = []
 
-def clean_odds(raw: Any) -> List[Dict[str, Any]]:
-    response = _safe_response(raw)
-    cleaned: List[Dict[str, Any]] = []
-
-    for item in response:
-        if not isinstance(item, dict):
-            continue
-
-        fixture = item.get("fixture") or {}
-        league = item.get("league") or {}
-
-        fid = fixture.get("id")
-        lid = league.get("id")
-
-        if fid is None or lid is None:
-            continue
-
-        for bm in item.get("bookmakers") or []:
-            # može da bude i int iz API-ja – zato str(...)
-            bookmaker_name = str(bm.get("name") or "").strip()
-
-            for bet in bm.get("bets") or []:
-                bet_name_raw = bet.get("name")
-                if bet_name_raw is None:
-                    continue
-
-                for val in bet.get("values") or []:
-                    label_raw = val.get("value")
-                    odd_str = val.get("odd")
-                    try:
-                        odd_val = float(odd_str)
-                    except Exception:
-                        continue
-
-                    market = _map_market(bet_name_raw, label_raw)
-
-                    cleaned.append(
-                        {
-                            "fixture_id": int(fid),
-                            "league_id": int(lid),
-                            "bookmaker": bookmaker_name,
-                            "bet_name": str(bet_name_raw),
-                            "label": str(label_raw) if label_raw is not None else "",
-                            "market": market,
-                            "odd": odd_val,
-                        }
-                    )
-
-    return cleaned
-
-
-# ---------------------------------------------------------------------------
-# STANDINGS
-# ---------------------------------------------------------------------------
-
-def clean_standings(raw: Any) -> List[Dict[str, Any]]:
-    """
-    API-Football standings response:
-    response: [
-        {
-            "league": {...},
-            "standings": [[{team stats...}, ...]]
-        }
-    ]
-    """
-    response = _safe_response(raw)
-    cleaned: List[Dict[str, Any]] = []
-
-    for item in response:
-        if not isinstance(item, dict):
-            continue
-
-        league = item.get("league") or {}
-        tables = item.get("standings") or []
-
-        for group in tables:
-            for team_row in group:
-                cleaned.append(
-                    {
-                        "league_id": league.get("id"),
-                        "team_id": team_row.get("team", {}).get("id"),
-                        "team_name": team_row.get("team", {}).get("name"),
-                        "rank": team_row.get("rank"),
-                        "points": team_row.get("points"),
-                        "all": team_row.get("all"),
-                    }
-                )
-    return cleaned
-
-
-# ---------------------------------------------------------------------------
-# TEAM STATS
-# ---------------------------------------------------------------------------
-
-def clean_team_stats(raw: Any) -> Dict[str, Any]:
-    """
-    Direct pass-through — API već vraća lep dict.
-    """
-    if isinstance(raw, dict):
-        return raw
-    return {}
-
-
-# ---------------------------------------------------------------------------
-# H2H
-# ---------------------------------------------------------------------------
-
-def clean_h2h(raw: Any) -> List[Dict[str, Any]]:
-    """
-    Vraća listu poslednjih mečeva između timova.
-    """
-    response = _safe_response(raw)
-    cleaned: List[Dict[str, Any]] = []
-
-    for item in response:
-        if not isinstance(item, dict):
-            continue
-
-        fx = item.get("fixture") or {}
-        teams = item.get("teams") or {}
+        for bm in bookmakers:
+            for market in bm.get("bets", []):
+                mname = (market.get("name") or "").strip()
+                for v in market.get("values", []):
+                    mapped = _map_market(mname, v.get("value"))
+                    if mapped:
+                        full.append(
+                            {
+                                "market": mapped,
+                                "odd": float(v.get("odd") or 0),
+                                "bookmaker": bm.get("name"),
+                            }
+                        )
 
         cleaned.append(
             {
-                "fixture_id": fx.get("id"),
-                "date": fx.get("date"),
-                "home": teams.get("home"),
-                "away": teams.get("away"),
-                "goals": item.get("goals"),
-                "score": item.get("score"),
+                "fixture_id": fixture_id,
+                "odds_full": full,
+                "best": best_market_odds(bookmakers),
             }
         )
 
     return cleaned
+
+
+# -----------------------------------------------------------------------
+# CLEAN STANDINGS
+# -----------------------------------------------------------------------
+def clean_standings(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _safe_response(raw, "response")
+
+
+# -----------------------------------------------------------------------
+# CLEAN TEAM STATS
+# -----------------------------------------------------------------------
+def clean_team_stats(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _safe_response(raw, "response")
+
+
+# -----------------------------------------------------------------------
+# CLEAN H2H LAST 5
+# -----------------------------------------------------------------------
+def clean_h2h(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _safe_response(raw, "response")
+
+
+# -----------------------------------------------------------------------
+# CLEAN PREDICTIONS
+# -----------------------------------------------------------------------
+def clean_predictions(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _safe_response(raw, "response")
+
+
+# -----------------------------------------------------------------------
+# CLEAN INJURIES
+# -----------------------------------------------------------------------
+def clean_injuries(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
+    return _safe_response(raw, "response")
