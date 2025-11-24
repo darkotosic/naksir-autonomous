@@ -171,7 +171,7 @@ const s = StyleSheet.create({
     paddingVertical: 18,
     borderRadius: 16,
     backgroundColor: Colors.card,
-    borderWidth: 1,
+    borderWidth: 3,
     borderColor: Colors.accent,
     alignItems: "center",
     ...layout.shadow,
@@ -193,6 +193,6 @@ const s = StyleSheet.create({
     opacity: 0.95,
   },
   spacer: {
-    height: 32,
+    height: 64,
   },
 });
