@@ -1,5 +1,5 @@
 // app/index.tsx
-import React from "react";
+import React, { useCallback, useEffect } from "react";
 import {
   View,
   Text,
@@ -12,6 +12,10 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { Colors, layout } from "../constants/theme";
+import mobileAds, {
+  MaxAdContentRating,
+  useInterstitialAd,
+} from "react-native-google-mobile-ads";
 
 const legalLinks = [
   { label: "Legal", url: "https://naksirpredictions.top/legal-disclaimer" },
@@ -19,8 +23,41 @@ const legalLinks = [
   { label: "Terms of Use", url: "https://naksirpredictions.top/terms-of-use" },
 ];
 
+const INTERSTITIAL_AD_UNIT_ID = "ca-app-pub-1726722567967096/7805445199";
+
 export default function LandingScreen() {
   const router = useRouter();
+  const { isLoaded, isClosed, load, show } = useInterstitialAd(
+    INTERSTITIAL_AD_UNIT_ID,
+    {
+      requestNonPersonalizedAdsOnly: true,
+    },
+  );
+
+  useEffect(() => {
+    mobileAds().initialize({
+      requestConfiguration: {
+        maxAdContentRating: MaxAdContentRating.T,
+        tagForChildDirectedTreatment: false,
+      },
+    });
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (isClosed) {
+      router.push("/tickets");
+      load();
+    }
+  }, [isClosed, load, router]);
+
+  const handleTicketsPress = useCallback(() => {
+    if (isLoaded) {
+      show();
+    } else {
+      router.push("/tickets");
+    }
+  }, [isLoaded, router, show]);
 
   return (
     <SafeAreaView style={s.safeArea}>
@@ -59,7 +96,7 @@ export default function LandingScreen() {
             <View style={s.spacer} />
 
             <Pressable
-              onPress={() => router.push("/tickets")}
+              onPress={handleTicketsPress}
               style={({ pressed }) => [s.ctaButton, pressed && s.pressed]}
             >
               <Text style={s.ctaLabel}>Naksir Ultimate 2+ Tickets</Text>

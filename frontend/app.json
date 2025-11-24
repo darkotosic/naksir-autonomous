@@ -18,6 +18,14 @@
         "backgroundColor": "#02030A"
       }
     },
+    "plugins": [
+      [
+        "react-native-google-mobile-ads",
+        {
+          "android_app_id": "ca-app-pub-1726722567967096~7271324233"
+        }
+      ]
+    ],
     "assetBundlePatterns": [
       "**/*"
     ],
