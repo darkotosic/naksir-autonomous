@@ -1,271 +1,249 @@
 # core_data/cleaners.py
 from __future__ import annotations
-from typing import Any, Dict, List
-import json
+
+from typing import Any, Dict, List, Optional
 
 
-# -----------------------------------------------------------------------
-# Canonical markets used across all builders and odds normalization
-# -----------------------------------------------------------------------
-DOC_MARKETS = {
-    "btts": [
-        "Both Teams To Score",
-        "BTTS",
-        "Goal",
-        "GG",
-        "Team to Score",
-    ],
-    "over_under": [
-        "Over/Under",
-        "Total Goals",
-        "Goals Over/Under",
-        "O/U",
-        "Totals",
-    ],
-    "ht_goals": [
-        "HT Over/Under",
-        "Half Time Over/Under",
-        "First Half Goals",
-        "1st Half - Over/Under",
-    ],
-}
+# ---------------------------------------------------------------------------
+# Helper: standardize access to raw["response"]
+# ---------------------------------------------------------------------------
 
-
-# -----------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------
-def _safe_response(raw: Dict[str, Any], key: str) -> List[Dict[str, Any]]:
-    """Return API-Football 'response' safely."""
-    return raw.get(key) or raw.get("response") or []
-
-
-def _normalize_ou_value(txt: str) -> str:
+def _safe_response(raw: Any) -> List[Dict[str, Any]]:
     """
-    Normalizes Over/Under goal value string into canonical form:
-    "Over 2.5", "Under 1.5", etc.
+    API-FOOTBALL vraća strukturu:
+    { "get": "...", "response": [ ... ] }
+
+    Ovaj helper vraća uvek listu dict-ova.
     """
-    if not txt:
-        return txt
-    t = txt.strip().replace(" ", "")
-    if "Over" in txt or "over" in txt:
-        val = txt.lower().replace("over", "").strip()
-        return f"Over {val}"
-    if "Under" in txt or "under" in txt:
-        val = txt.lower().replace("under", "").strip()
-        return f"Under {val}"
-    return txt
+    if raw is None:
+        return []
+    if isinstance(raw, dict):
+        resp = raw.get("response")
+        if isinstance(resp, list):
+            return resp
+        return []
+    if isinstance(raw, list):
+        return raw
+    return []
 
 
-# -----------------------------------------------------------------------
-# BEST MARKET ODDS (canonical)
-# FIXED — now fully indented and valid Python
-# -----------------------------------------------------------------------
-def best_market_odds(bookmakers: list) -> dict:
+# ---------------------------------------------------------------------------
+# FIXTURES
+# ---------------------------------------------------------------------------
+
+def clean_fixtures(raw: Any) -> List[Dict[str, Any]]:
     """
-    Extracts best odds for canonical markets:
-    - BTTS {Yes/No}
-    - Over/Under {Over X.X, Under X.X}
-    - HT Over/Under {Over X.X, Under X.X}
+    Vraća *originalne* fixture objekte iz API-ja, ali filtrirane:
 
-    Results example:
-    {
-        "BTTS": {"Yes": 1.72, "No": 2.05},
-        "Over/Under": {"Over 2.5": 1.85, "Under 2.5": 1.95},
-        "HT_Over/Under": {"Over 0.5": 1.30, "Under 0.5": 3.40},
-    }
+    - mora da postoji fixture.id, league.id, home/away name
+    - izbacuje završene / otkazane utakmice
+
+    Ovo je važno jer builderi (common.build_leg, is_fixture_playable)
+    očekuju baš API-FOOTBALL strukturu, ne custom dict.
     """
-    odds_best: dict = {}
+    response = _safe_response(raw)
+    cleaned: List[Dict[str, Any]] = []
 
-    for bm in bookmakers or []:
-        for market in bm.get("bets", []):
-            mname = (market.get("name") or "").strip()
+    for item in response:
+        if not isinstance(item, dict):
+            continue
 
-            # -------------------------
-            # BTTS
-            # -------------------------
-            if any(mname.startswith(x) for x in DOC_MARKETS["btts"]):
-                for item in market.get("values", []):
-                    lbl_raw = (item.get("value") or "").strip()
-                    low = lbl_raw.lower()
+        fixture = item.get("fixture") or {}
+        league = item.get("league") or {}
+        teams = item.get("teams") or {}
 
-                    if low in ("yes", "gg", "goal"):
-                        key = "Yes"
-                    elif low in ("no", "ng", "nogoal"):
-                        key = "No"
-                    else:
-                        key = lbl_raw
+        fid = fixture.get("id")
+        lid = league.get("id")
+        home = (teams.get("home") or {}).get("name")
+        away = (teams.get("away") or {}).get("name")
 
-                    odds_best.setdefault("BTTS", {})
-                    odds_best["BTTS"][key] = float(item.get("odd") or 0)
+        if fid is None or lid is None or not home or not away:
+            continue
 
-            # -------------------------
-            # FT Over/Under
-            # -------------------------
-            if any(mname.startswith(x) for x in DOC_MARKETS["over_under"]):
-                for item in market.get("values", []):
-                    lbl = _normalize_ou_value(item.get("value") or "")
-                    odds_best.setdefault("Over/Under", {})
-                    odds_best["Over/Under"][lbl] = float(item.get("odd") or 0)
+        status = (fixture.get("status") or {}).get("short")
+        # završeni / otkazani statusi koje ne želimo u builderima
+        if status in {"FT", "AET", "PEN", "CANC", "ABD", "PST", "AWD", "WO"}:
+            continue
 
-            # -------------------------
-            # HT Over/Under
-            # -------------------------
-            if any(mname.startswith(x) for x in DOC_MARKETS["ht_goals"]):
-                for item in market.get("values", []):
-                    lbl = _normalize_ou_value(item.get("value") or "")
-                    odds_best.setdefault("HT_Over/Under", {})
-                    odds_best["HT_Over/Under"][lbl] = float(item.get("odd") or 0)
+        cleaned.append(item)
 
-    return odds_best
+    return cleaned
 
 
-# -----------------------------------------------------------------------
-# CLEAN FIXTURES
-# -----------------------------------------------------------------------
-def clean_fixtures(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    fixtures = []
-    for fx in _safe_response(raw, "response"):
-        fixture_id = fx.get("fixture", {}).get("id")
-        league = fx.get("league", {})
-        teams = fx.get("teams", {})
-        fixtures.append(
-            {
-                "fixture_id": fixture_id,
-                "kickoff": fx.get("fixture", {}).get("date"),
-                "league_id": league.get("id"),
-                "league_name": league.get("name"),
-                "league_country": league.get("country"),
-                "home": teams.get("home", {}).get("name"),
-                "away": teams.get("away", {}).get("name"),
-            }
-        )
-    return fixtures
+# ---------------------------------------------------------------------------
+# ODDS – canonical row-by-row format za buildere
+# ---------------------------------------------------------------------------
 
-
-# -----------------------------------------------------------------------
-# MAP ODDS MARKET → canonical code inside odds dictionary
-# -----------------------------------------------------------------------
-def _map_market(name: str, value: str) -> str | None:
+def _map_market(bet_name: Any, label: Any) -> Optional[str]:
     """
-    Return canonical market code like:
-    O15, O25, U35, HT_O05, BTTS_YES, BTTS_NO, DC_1X...
+    Pretvara (bet_name, label) iz API-ja u canonical market kod,
+    npr. HOME, DRAW, AWAY, O15, O25, U35, HT_O05, BTTS_YES, BTTS_NO, DC_1X, DC_X2...
+
+    Ovaj kod se koristi samo kao meta informacija; builderi rade preko
+    (bet_name, value_label) kombinacija.
     """
-    if not name:
+    bn = str(bet_name or "").strip().lower()
+    lv = str(label or "").strip().lower()
+
+    # Match Winner
+    if bn == "match winner":
+        if lv in {"home", "1"}:
+            return "HOME"
+        if lv in {"draw", "x"}:
+            return "DRAW"
+        if lv in {"away", "2"}:
+            return "AWAY"
         return None
 
-    n = name.lower()
+    # Double Chance
+    if bn == "double chance":
+        if lv in {"1x", "1 or draw"}:
+            return "DC_1X"
+        if lv in {"x2", "2x", "draw or 2"}:
+            return "DC_X2"
+        if lv in {"12", "1 or 2"}:
+            return "DC_12"
+        return None
 
-    if "both teams" in n or "btts" in n:
-        v = value.lower()
-        if v in ("yes", "gg", "goal"):
-            return "BTTS_YES"
-        if v in ("no", "ng", "nogoal"):
-            return "BTTS_NO"
-
-    if "over" in n and value:
+    # Goals Over/Under (full time)
+    if bn == "goals over/under":
+        parts = lv.split()
+        if len(parts) != 2:
+            return None
+        side, line = parts
         try:
-            g = float(value)
+            g = float(line)
+        except Exception:
+            return None
+
+        if side == "over":
             if abs(g - 1.5) < 0.01:
                 return "O15"
             if abs(g - 2.5) < 0.01:
                 return "O25"
             if abs(g - 3.5) < 0.01:
                 return "O35"
-        except:
-            pass
-
-    if "under" in n and value:
-        try:
-            g = float(value)
+        if side == "under":
             if abs(g - 3.5) < 0.01:
                 return "U35"
-        except:
-            pass
+        return None
 
-    if "half" in n or "ht" in n:
-        if "over" in n and value:
-            try:
-                g = float(value)
-                if abs(g - 0.5) < 0.01:
-                    return "HT_O05"
-            except:
-                pass
+    # First Half Over 0.5
+    if "1st half" in bn and "over" in lv and "0.5" in lv:
+        return "HT_O05"
 
-    if "double chance" in n or "dc" in n:
-        vl = value.lower()
-        if vl == "1x":
-            return "DC_1X"
-        if vl == "x2":
-            return "DC_X2"
+    # BTTS
+    if "both teams to score" in bn or "both teams score" in bn or "btts" in bn:
+        if lv in {"yes", "gg", "goal"}:
+            return "BTTS_YES"
+        if lv in {"no", "ng", "nogoal"}:
+            return "BTTS_NO"
+        return None
 
     return None
 
 
-# -----------------------------------------------------------------------
-# CLEAN ODDS
-# -----------------------------------------------------------------------
-def clean_odds(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    cleaned = []
-    for ox in _safe_response(raw, "response"):
-        fixture_id = ox.get("fixture", {}).get("id")
-        bookmakers = ox.get("bookmakers", [])
-        full = []
+def clean_odds(raw: Any) -> List[Dict[str, Any]]:
+    """
+    Vraća listu "ravnih" redova koje očekuju builderi (builders/common.py):
 
-        for bm in bookmakers:
-            for market in bm.get("bets", []):
-                mname = (market.get("name") or "").strip()
-                for v in market.get("values", []):
-                    mapped = _map_market(mname, v.get("value"))
-                    if mapped:
-                        full.append(
-                            {
-                                "market": mapped,
-                                "odd": float(v.get("odd") or 0),
-                                "bookmaker": bm.get("name"),
-                            }
-                        )
+    {
+        "fixture_id": int,
+        "league_id": int,
+        "bookmaker": str,
+        "bet_name": str,   # npr. "Goals Over/Under"
+        "label": str,      # npr. "Over 2.5"
+        "market": str|None,# canonical npr. "O25"
+        "odd": float,
+    }
+    """
+    response = _safe_response(raw)
+    cleaned: List[Dict[str, Any]] = []
 
-        cleaned.append(
-            {
-                "fixture_id": fixture_id,
-                "odds_full": full,
-                "best": best_market_odds(bookmakers),
-            }
-        )
+    for item in response:
+        if not isinstance(item, dict):
+            continue
+
+        fixture = item.get("fixture") or {}
+        league = item.get("league") or {}
+
+        fid = fixture.get("id")
+        lid = league.get("id")
+
+        if fid is None or lid is None:
+            continue
+
+        for bm in item.get("bookmakers") or []:
+            bookmaker_name = str(bm.get("name") or "").strip()
+
+            for bet in bm.get("bets") or []:
+                bet_name_raw = bet.get("name")
+                if bet_name_raw is None:
+                    continue
+
+                for val in bet.get("values") or []:
+                    label_raw = val.get("value")
+                    odd_str = val.get("odd")
+                    try:
+                        odd_val = float(odd_str)
+                    except Exception:
+                        continue
+
+                    market_code = _map_market(bet_name_raw, label_raw)
+
+                    cleaned.append(
+                        {
+                            "fixture_id": int(fid),
+                            "league_id": int(lid),
+                            "bookmaker": bookmaker_name,
+                            "bet_name": str(bet_name_raw),
+                            "label": str(label_raw) if label_raw is not None else "",
+                            "market": market_code,
+                            "odd": odd_val,
+                        }
+                    )
 
     return cleaned
 
 
-# -----------------------------------------------------------------------
-# CLEAN STANDINGS
-# -----------------------------------------------------------------------
-def clean_standings(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return _safe_response(raw, "response")
+# ---------------------------------------------------------------------------
+# STANDINGS
+# ---------------------------------------------------------------------------
+
+def clean_standings(raw: Any) -> List[Dict[str, Any]]:
+    """
+    Vraća raw response listu; dodatno čišćenje radiš po potrebi.
+    """
+    return _safe_response(raw)
 
 
-# -----------------------------------------------------------------------
-# CLEAN TEAM STATS
-# -----------------------------------------------------------------------
-def clean_team_stats(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return _safe_response(raw, "response")
+# ---------------------------------------------------------------------------
+# TEAM STATS
+# ---------------------------------------------------------------------------
+
+def clean_team_stats(raw: Any) -> List[Dict[str, Any]]:
+    return _safe_response(raw)
 
 
-# -----------------------------------------------------------------------
-# CLEAN H2H LAST 5
-# -----------------------------------------------------------------------
-def clean_h2h(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return _safe_response(raw, "response")
+# ---------------------------------------------------------------------------
+# H2H
+# ---------------------------------------------------------------------------
+
+def clean_h2h(raw: Any) -> List[Dict[str, Any]]:
+    return _safe_response(raw)
 
 
-# -----------------------------------------------------------------------
-# CLEAN PREDICTIONS
-# -----------------------------------------------------------------------
-def clean_predictions(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return _safe_response(raw, "response")
+# ---------------------------------------------------------------------------
+# PREDICTIONS
+# ---------------------------------------------------------------------------
+
+def clean_predictions(raw: Any) -> List[Dict[str, Any]]:
+    return _safe_response(raw)
 
 
-# -----------------------------------------------------------------------
-# CLEAN INJURIES
-# -----------------------------------------------------------------------
-def clean_injuries(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
-    return _safe_response(raw, "response")
+# ---------------------------------------------------------------------------
+# INJURIES
+# ---------------------------------------------------------------------------
+
+def clean_injuries(raw: Any) -> List[Dict[str, Any]]:
+    return _safe_response(raw)
