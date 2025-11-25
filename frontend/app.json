@@ -3,7 +3,7 @@
     "name": "Naksir Ultimate 2+ Tickets",
     "slug": "naksir-ultimate-2plus-tickets",
     "scheme": "naksir-ultimate-2plus",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "splash": {
@@ -13,19 +13,12 @@
     },
     "android": {
       "package": "top.naksir.ultimate2plus",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#02030A"
       }
     },
-    "plugins": [
-      [
-        "react-native-google-mobile-ads",
-        {
-          "android_app_id": "ca-app-pub-1726722567967096~7271324233"
-        }
-      ]
-    ],
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -34,5 +27,9 @@
         "projectId": "0db11a12-596d-4ace-9004-6a7e57706f76"
       }
     }
+  },
+
+  "react-native-google-mobile-ads": {
+    "android_app_id": "ca-app-pub-1726722567967096~7271324233"
   }
 }
