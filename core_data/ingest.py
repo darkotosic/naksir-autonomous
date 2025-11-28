@@ -32,6 +32,25 @@ DEFAULT_LEAGUES: List[int] = [
     39,   # Premier League
     140,  # La Liga
     135,  # Serie A
+    3,
+    14,
+    2,
+    848,
+    38,
+    78,
+    79,
+    61,
+    62,
+    218,
+    88,
+    89,
+    203,
+    40,
+    119,
+    136,
+    736,
+    207,
+    
     # dodaj po potrebi: 78 (Bundesliga), 61 (Ligue 1), itd.
 ]
 
