@@ -124,6 +124,41 @@ def get_market_odds(
     return min(found)
 
 
+def get_market_odds_by_code(
+    odds_index: Dict[int, List[Dict[str, Any]]],
+    fixture_id: int,
+    market_code: str,
+) -> Optional[float]:
+    """
+    Vraća kvotu za zadati canonical market kod (HOME, O15, BTTS_YES...),
+    korišćenjem polja 'market' koje puni clean_odds/_map_market.
+
+    Vrati NAJNIŽU kvotu (konzervativno) među bookmakerima ili None.
+    """
+    rows = odds_index.get(fixture_id) or []
+    if not rows:
+        return None
+
+    code_key = (market_code or "").strip().upper()
+    found: List[float] = []
+
+    for r in rows:
+        r_code = (r.get("market") or "").strip().upper()
+        if r_code != code_key:
+            continue
+
+        odd_val = r.get("odd")
+        try:
+            if odd_val is not None:
+                found.append(float(odd_val))
+        except (TypeError, ValueError):
+            continue
+
+    if not found:
+        return None
+    return min(found)
+
+
 def build_leg(
     fixture: Dict[str, Any],
     *,
