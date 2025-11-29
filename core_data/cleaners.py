@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 # Helper: standardize access to raw["response"]
 # ---------------------------------------------------------------------------
 
+
 def _safe_response(raw: Any) -> List[Dict[str, Any]]:
     """
     API-FOOTBALL vraća strukturu:
@@ -51,6 +52,7 @@ def _safe_response(raw: Any) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # FIXTURES
 # ---------------------------------------------------------------------------
+
 
 def clean_fixtures(raw: Any) -> List[Dict[str, Any]]:
     """
@@ -95,81 +97,69 @@ def clean_fixtures(raw: Any) -> List[Dict[str, Any]]:
 # ODDS – canonical row-by-row format za buildere
 # ---------------------------------------------------------------------------
 
+
 def _map_market(bet_name: Any, label: Any) -> Optional[str]:
-    """
-    Pretvara (bet_name, label) iz API-ja u canonical market kod,
-    npr. HOME, DRAW, AWAY, O15, O25, U35, HT_O05, BTTS_YES, BTTS_NO, DC_1X, DC_X2...
+    bn = str(bet_name or "").lower().strip()
+    lb = str(label or "").lower().strip()
 
-    Ovaj kod se koristi samo kao meta informacija; builderi rade preko
-    (bet_name, value_label) kombinacija.
-    """
-    bn = str(bet_name or "").strip().lower()
-    lv = str(label or "").strip().lower()
-    bn_norm = bn.replace("full time", "").replace("regular time", "").replace(" - ", " ")
-    bn_norm = " ".join(bn_norm.split())
-    lv_norm = " ".join(lv.split())
+    # Normalizacija
+    bn = bn.replace("-", " ").replace("_", " ")
+    lb = lb.replace("-", " ").replace("_", " ")
 
-    # Match Winner
-    if "match winner" in bn_norm or bn_norm == "1x2":
-        if lv_norm in {"home", "1"}:
+    # --- MATCH WINNER ---
+    if "match winner" in bn or bn == "1x2":
+        if lb in {"home", "1"}:
             return "HOME"
-        if lv_norm in {"draw", "x"}:
+        if lb in {"draw", "x"}:
             return "DRAW"
-        if lv_norm in {"away", "2"}:
+        if lb in {"away", "2"}:
             return "AWAY"
         return None
 
-    # Double Chance
-    if "double chance" in bn_norm:
-        if lv_norm in {"1x", "1 or draw"}:
+    # --- DOUBLE CHANCE ---
+    if "double chance" in bn:
+        if lb in {"1x", "1 or draw"}:
             return "DC_1X"
-        if lv_norm in {"x2", "2x", "draw or 2"}:
+        if lb in {"x2", "draw or 2"}:
             return "DC_X2"
-        if lv_norm in {"12", "1 or 2"}:
+        if lb in {"12", "1 or 2"}:
             return "DC_12"
         return None
 
-    # Goals Over/Under (full time)
-    if "goals over/under" in bn_norm:
-        tokens = lv_norm.split()
-        if not tokens:
+    # --- BTTS / GG ---
+    if "btts" in bn or "both teams" in bn or "to score" in bn or "goal/nogoal" in lb:
+        if lb in {"yes", "gg", "goal", "goal/goal"}:
+            return "BTTS_YES"
+        if lb in {"no", "ng", "nogoal", "no goal"}:
+            return "BTTS_NO"
+        return None
+
+    # --- OVER/UNDER total goals ---
+    if "over" in lb or "under" in lb or "goals" in bn or "total" in bn:
+        # pronalazi broj 1.5,2.5,3.5 iz labela
+        import re
+
+        m = re.search(r"(\d+(\.\d)?)", lb)
+        if not m:
             return None
+        g = float(m.group(1))
 
-        side = tokens[0]
-        g = None
-        for token in tokens[1:]:
-            try:
-                g = float(token)
-                break
-            except Exception:
-                continue
-
-        if g is None:
-            return None
-
-        if side == "over":
+        if "over" in lb:
             if abs(g - 1.5) < 0.01:
                 return "O15"
             if abs(g - 2.5) < 0.01:
                 return "O25"
             if abs(g - 3.5) < 0.01:
                 return "O35"
-        if side == "under":
+        if "under" in lb:
             if abs(g - 3.5) < 0.01:
                 return "U35"
         return None
 
-    # First Half Over 0.5
-    if "1st half" in bn and "over" in lv and "0.5" in lv:
-        return "HT_O05"
-
-    # BTTS
-    if "both teams to score" in bn_norm or "both teams score" in bn_norm or "btts" in bn_norm:
-        if lv_norm in {"yes", "gg", "goal"}:
-            return "BTTS_YES"
-        if lv_norm in {"no", "ng", "nogoal"}:
-            return "BTTS_NO"
-        return None
+    # --- FIRST HALF ---
+    if "1st half" in bn or "1h" in bn or "first half" in bn:
+        if "over" in lb and ("0.5" in lb or "0 5" in lb):
+            return "HT_O05"
 
     return None
 
@@ -241,6 +231,7 @@ def clean_odds(raw: Any) -> List[Dict[str, Any]]:
 # STANDINGS
 # ---------------------------------------------------------------------------
 
+
 def clean_standings(raw: Any) -> List[Dict[str, Any]]:
     return _safe_response(raw)
 
@@ -248,6 +239,7 @@ def clean_standings(raw: Any) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # TEAM STATS
 # ---------------------------------------------------------------------------
+
 
 def clean_team_stats(raw: Any) -> List[Dict[str, Any]]:
     return _safe_response(raw)
@@ -257,6 +249,7 @@ def clean_team_stats(raw: Any) -> List[Dict[str, Any]]:
 # H2H
 # ---------------------------------------------------------------------------
 
+
 def clean_h2h(raw: Any) -> List[Dict[str, Any]]:
     return _safe_response(raw)
 
@@ -265,6 +258,7 @@ def clean_h2h(raw: Any) -> List[Dict[str, Any]]:
 # PREDICTIONS
 # ---------------------------------------------------------------------------
 
+
 def clean_predictions(raw: Any) -> List[Dict[str, Any]]:
     return _safe_response(raw)
 
@@ -272,6 +266,7 @@ def clean_predictions(raw: Any) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # INJURIES
 # ---------------------------------------------------------------------------
+
 
 def clean_injuries(raw: Any) -> List[Dict[str, Any]]:
     return _safe_response(raw)
