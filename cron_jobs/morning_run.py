@@ -15,7 +15,7 @@ from core_data.ingest import fetch_all_data
 from core_data.cache import read_json, read_or_fallback, write_json, CACHE_ROOT
 from core_data.aggregator import build_all_data
 from builders.engine import build_ticket_sets
-from outputs.pages_writer import write_tickets_json
+from outputs.pages_writer import write_tickets_json, write_btts_json, write_btts_stats_json
 from outputs.telegram_bot import send_message
 from ai_engine.meta import (
     annotate_ticket_sets_with_score,
@@ -279,6 +279,26 @@ def main() -> None:
 
     _preview_fixtures(fixtures)
     _preview_odds(odds)
+
+    # 2b) Build BTTS Yes morning feed
+    try:
+        from outputs.btts_feed import build_btts_feed
+
+        print("[BTTS] Building BTTS Yes feed for morning run...")
+        btts_feed, btts_stats = build_btts_feed(
+            fixtures=fixtures,
+            odds=odds,
+            all_data=all_data,
+            day=fixtures_day,
+        )
+        write_btts_json(btts_feed)
+        write_btts_stats_json(btts_stats)
+        print(
+            f"[BTTS] BTTS feed written: matches={len(btts_feed.get('matches', []))} "
+            f"date={btts_feed.get('date')}"
+        )
+    except Exception as e:
+        print(f"[BTTS][ERROR] Failed to build BTTS feed: {e}")
 
     # 3) Build all ticket sets (LAYER 2)
     try:

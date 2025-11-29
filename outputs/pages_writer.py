@@ -80,3 +80,38 @@ def write_evaluation_json(evaluation: Dict[str, Any]) -> None:
     fp = PUBLIC_DIR / "evaluation.json"
     with fp.open("w", encoding="utf-8") as f:
         json.dump(evaluation, f, ensure_ascii=False, indent=2)
+
+
+def write_btts_json(btts_feed: Dict[str, Any]) -> None:
+    """Upisuje public/btts.json.
+
+    Očekuje payload u formatu:
+      {
+        "date": "YYYY-MM-DD",
+        "generated_at": "...",
+        "meta": {...},
+        "matches": [...]
+      }
+    """
+    _ensure_public_dir()
+    fp = PUBLIC_DIR / "btts.json"
+    with fp.open("w", encoding="utf-8") as f:
+        json.dump(btts_feed, f, ensure_ascii=False, indent=2)
+
+
+def write_btts_stats_json(btts_stats: Dict[str, Any]) -> None:
+    """Upisuje public/btts.stats.json.
+
+    Očekuje payload u formatu:
+      {
+        "date": "YYYY-MM-DD",
+        "generated_at": "...",
+        "fixtures": {
+          "<fixture_id>": {...}
+        }
+      }
+    """
+    _ensure_public_dir()
+    fp = PUBLIC_DIR / "btts.stats.json"
+    with fp.open("w", encoding="utf-8") as f:
+        json.dump(btts_stats, f, ensure_ascii=False, indent=2)
