@@ -84,36 +84,46 @@ def _map_market(bet_name: Any, label: Any) -> Optional[str]:
     """
     bn = str(bet_name or "").strip().lower()
     lv = str(label or "").strip().lower()
+    bn_norm = bn.replace("full time", "").replace("regular time", "").replace(" - ", " ")
+    bn_norm = " ".join(bn_norm.split())
+    lv_norm = " ".join(lv.split())
 
     # Match Winner
-    if bn == "match winner":
-        if lv in {"home", "1"}:
+    if "match winner" in bn_norm or bn_norm == "1x2":
+        if lv_norm in {"home", "1"}:
             return "HOME"
-        if lv in {"draw", "x"}:
+        if lv_norm in {"draw", "x"}:
             return "DRAW"
-        if lv in {"away", "2"}:
+        if lv_norm in {"away", "2"}:
             return "AWAY"
         return None
 
     # Double Chance
-    if bn == "double chance":
-        if lv in {"1x", "1 or draw"}:
+    if "double chance" in bn_norm:
+        if lv_norm in {"1x", "1 or draw"}:
             return "DC_1X"
-        if lv in {"x2", "2x", "draw or 2"}:
+        if lv_norm in {"x2", "2x", "draw or 2"}:
             return "DC_X2"
-        if lv in {"12", "1 or 2"}:
+        if lv_norm in {"12", "1 or 2"}:
             return "DC_12"
         return None
 
     # Goals Over/Under (full time)
-    if bn == "goals over/under":
-        parts = lv.split()
-        if len(parts) != 2:
+    if "goals over/under" in bn_norm:
+        tokens = lv_norm.split()
+        if not tokens:
             return None
-        side, line = parts
-        try:
-            g = float(line)
-        except Exception:
+
+        side = tokens[0]
+        g = None
+        for token in tokens[1:]:
+            try:
+                g = float(token)
+                break
+            except Exception:
+                continue
+
+        if g is None:
             return None
 
         if side == "over":
@@ -133,10 +143,10 @@ def _map_market(bet_name: Any, label: Any) -> Optional[str]:
         return "HT_O05"
 
     # BTTS
-    if "both teams to score" in bn or "both teams score" in bn or "btts" in bn:
-        if lv in {"yes", "gg", "goal"}:
+    if "both teams to score" in bn_norm or "both teams score" in bn_norm or "btts" in bn_norm:
+        if lv_norm in {"yes", "gg", "goal"}:
             return "BTTS_YES"
-        if lv in {"no", "ng", "nogoal"}:
+        if lv_norm in {"no", "ng", "nogoal"}:
             return "BTTS_NO"
         return None
 
