@@ -73,6 +73,7 @@ def _normalize_items(raw: Any, label: str) -> List[Dict[str, Any]]:
 
 def _read_with_fallback(name: str, today: date) -> Tuple[Any, date]:
     """Load cached JSON with automatic fallback to previous days."""
+    print(f"[CACHE][DEBUG] Attempting to read {name} for {today.isoformat()}")
     primary = read_json(name, today)
     if primary is not None:
         print(f"[CACHE] Loaded {name} for {today.isoformat()}")
@@ -198,6 +199,19 @@ def _format_ticket_message(set_code: str, set_label: str, ticket: Dict[str, Any]
 
 
 # -----------------------------
+# Debug helpers
+# -----------------------------
+
+def _log_step(title: str, **details: Any) -> None:
+    """Uniforman izlaz za praćenje koraka u cron job-u."""
+    suffix = ""
+    if details:
+        kv = [f"{k}={v}" for k, v in details.items()]
+        suffix = " | " + " | ".join(kv)
+    print(f"[STEP][{datetime.utcnow().isoformat()}] {title}{suffix}")
+
+
+# -----------------------------
 # Main pipeline
 # -----------------------------
 
@@ -208,6 +222,7 @@ def main() -> None:
     print(f"[INFO] Today: {today.isoformat()} (cache day)")
 
     # 1) Ingest svih podataka (LAYER 1)
+    _log_step("INGEST start", days_ahead=2)
     try:
         print("[INGEST] Calling fetch_all_data(days_ahead=2)...")
         ingest_summary = fetch_all_data(days_ahead=2)
@@ -222,9 +237,16 @@ def main() -> None:
         return
 
     # 2) Učitaj fixtures, odds i all_data iz cache-a
+    _log_step("CACHE load start", target_day=today.isoformat())
     fixtures_raw, fixtures_day = _read_with_fallback("fixtures.json", today)
     odds_raw, odds_day = _read_with_fallback("odds.json", today)
     all_data_raw, all_data_day = _read_with_fallback("all_data.json", today)
+    _log_step(
+        "CACHE load done",
+        fixtures_day=fixtures_day,
+        odds_day=odds_day,
+        all_data_day=all_data_day,
+    )
 
     if fixtures_raw is None:
         print("[ERROR] fixtures.json for today not found in cache. Aborting.")
@@ -237,6 +259,7 @@ def main() -> None:
     # on-the-fly izgradnju all_data.json.
     fixtures = _normalize_items(fixtures_raw, "fixtures")
     odds = _normalize_items(odds_raw, "odds")
+    _log_step("NORMALIZE done", fixtures=len(fixtures), odds=len(odds))
 
     if all_data_raw is None:
         print("[WARN] all_data.json for today not found in cache. Attempting to build on the fly.")
@@ -258,6 +281,12 @@ def main() -> None:
                 write_json("all_data.json", all_data, day=fixtures_day)
                 all_data_day = fixtures_day
                 print(f"[INFO] Built all_data.json on the fly for {fixtures_day.isoformat()}.")
+                _log_step(
+                    "ALL_DATA rebuilt",
+                    standings=len(standings_list),
+                    team_stats=len(team_stats_list),
+                    h2h=len(h2h_list),
+                )
             except Exception as e:
                 print(f"[ERROR] Failed to build all_data.json on the fly: {e}")
                 all_data = {}
@@ -281,6 +310,7 @@ def main() -> None:
     _preview_odds(odds)
 
     # 2b) Build BTTS Yes morning feed
+    _log_step("BTTS start", fixtures=len(fixtures), odds=len(odds))
     try:
         from outputs.btts_feed import build_btts_feed
 
@@ -297,10 +327,16 @@ def main() -> None:
             f"[BTTS] BTTS feed written: matches={len(btts_feed.get('matches', []))} "
             f"date={btts_feed.get('date')}"
         )
+        _log_step(
+            "BTTS done",
+            matches=len(btts_feed.get("matches", [])),
+            stats=len(btts_stats.get("leagues", [])) if isinstance(btts_stats, dict) else 0,
+        )
     except Exception as e:
         print(f"[BTTS][ERROR] Failed to build BTTS feed: {e}")
 
     # 3) Build all ticket sets (LAYER 2)
+    _log_step("ENGINE start")
     try:
         print("[ENGINE] Building ticket sets...")
         ticket_sets = build_ticket_sets(fixtures, odds)
@@ -326,6 +362,7 @@ def main() -> None:
     )
 
     # 3a) AI scoring (LAYER 3)
+    _log_step("AI scoring start", sets=len(sets))
     try:
         ticket_sets = annotate_ticket_sets_with_score(ticket_sets)
         print("[AI] Ticket sets annotated with score.")
@@ -334,6 +371,7 @@ def main() -> None:
 
     # 3b) In-depth AI analiza po svakom legu (LAYER 3b)
     if all_data:
+        _log_step("AI in-depth start", legs_total=total_tickets_after)
         try:
             ticket_sets = attach_in_depth_analysis(ticket_sets, all_data)
             print("[AI] In-depth analysis attached to legs.")
@@ -394,6 +432,7 @@ def main() -> None:
     }
 
     # 4) Upis tickets.json za frontend / Pages (LAYER 4)
+    _log_step("OUTPUT start", sets=len(sets_after), tickets=total_tickets_after)
     try:
         write_tickets_json(ticket_sets)
         print(
