@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("API_FOOTBALL_KEY", "")
 API_BASE = os.getenv("API_FOOTBALL_BASE_URL", "https://v3.football.api-sports.io")
+TIMEZONE = os.getenv("API_FOOTBALL_TIMEZONE", "Europe/Belgrade")
 
 # Minimalna pauza između poziva da ne čekićamo API (u sekundama)
 MIN_REQUEST_INTERVAL = float(os.getenv("API_FOOTBALL_MIN_INTERVAL", "0.3"))
@@ -198,9 +199,15 @@ def get_api_status() -> Dict[str, Any]:
 
 def fetch_fixtures_by_date(target_date: str) -> Dict[str, Any]:
     """
-    /fixtures?date=YYYY-MM-DD
+    /fixtures?date=YYYY-MM-DD&timezone=TZ
     """
-    return _request("fixtures", params={"date": target_date})
+    return _request(
+        "fixtures",
+        params={
+            "date": target_date,
+            "timezone": TIMEZONE,
+        },
+    )
 
 
 # ---------------------------------------------------------------------
@@ -209,11 +216,17 @@ def fetch_fixtures_by_date(target_date: str) -> Dict[str, Any]:
 
 def fetch_odds_by_date(target_date: str) -> Dict[str, Any]:
     """
-    /odds?date=YYYY-MM-DD
+    /odds?date=YYYY-MM-DD&timezone=TZ
     Napomena: API-FOOTBALL ima više varijacija (odds/live, odds/between, itd),
     ovde koristimo osnovni daily snapshot.
     """
-    return _request("odds", params={"date": target_date})
+    return _request(
+        "odds",
+        params={
+            "date": target_date,
+            "timezone": TIMEZONE,
+        },
+    )
 
 
 # ---------------------------------------------------------------------

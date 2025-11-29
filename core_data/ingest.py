@@ -56,11 +56,27 @@ DEFAULT_LEAGUES: List[int] = [
 
 # Mapiranje liga -> sezona (OBAVEZNO prilagodi aktuelnoj sezoni)
 SEASON_MAP: Dict[int, int] = {
-    39: 2024,
-    140: 2024,
-    135: 2024,
-   # 78: 2024,
-    # 61: 2024,
+    39: 2025,
+    140: 2025,
+    135: 2025,
+    3: 2025,
+    14: 2025,
+    2: 2025,
+    848: 2025,
+    38: 2025,
+    78: 2025,
+    79: 2025,
+    61: 2025,
+    62: 2025,
+    218: 2025,
+    88: 2025,
+    89: 2025,
+    203: 2025,
+    40: 2025,
+    119: 2025,
+    136: 2025,
+    736: 2025,
+    207: 2025,
 }
 
 # Lige koje želiš da tretiraš kao rizične (npr. Iran, UAE, egzotične)
@@ -129,9 +145,37 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
         # 1.1 Fixtures
         raw_fixtures = fetch_fixtures_by_date(ds)
         fixtures = clean_fixtures(raw_fixtures)
-        write_json("fixtures.json", fixtures, day=d)
-        results_summary["fixtures_days"].append({"date": ds, "count": len(fixtures)})
-        logger.info("[INGEST] Fixtures loaded for %s: count=%s", ds, len(fixtures))
+
+        if fixtures:
+            # Imamo sveže podatke iz API-ja
+            write_json("fixtures.json", fixtures, day=d)
+            results_summary["fixtures_days"].append(
+                {"date": ds, "count": len(fixtures), "source": "api"}
+            )
+            logger.info("[INGEST] Fixtures loaded for %s from API: count=%s", ds, len(fixtures))
+        else:
+            # API vratio 0 – pokušaj da zadržiš postojeći cache ako postoji
+            cached_fixtures = read_json("fixtures.json", day=d)
+            if isinstance(cached_fixtures, list) and cached_fixtures:
+                fixtures = cached_fixtures
+                results_summary["fixtures_days"].append(
+                    {"date": ds, "count": len(fixtures), "source": "cache"}
+                )
+                logger.warning(
+                    "[INGEST] API returned 0 fixtures for %s, reusing cache (count=%s)",
+                    ds,
+                    len(fixtures),
+                )
+            else:
+                # Nema ni cache – pišemo prazan fajl, ali svesno
+                write_json("fixtures.json", [], day=d)
+                results_summary["fixtures_days"].append(
+                    {"date": ds, "count": 0, "source": "empty"}
+                )
+                logger.warning(
+                    "[INGEST] API returned 0 fixtures and no cache exists for %s; writing empty.",
+                    ds,
+                )
 
         if d == today:
             fixtures_today = fixtures
@@ -139,16 +183,49 @@ def fetch_all_data(days_ahead: int = 2) -> Dict[str, Any]:
         # 1.2 Odds
         raw_odds = fetch_odds_by_date(ds)
         odds = clean_odds(raw_odds)
-        write_json("odds.json", odds, day=d)
-        results_summary["odds_days"].append({"date": ds, "count": len(odds)})
-        logger.info("[INGEST] Odds loaded for %s: count=%s", ds, len(odds))
 
-    # Ako iz nekog razloga danas nema fixtures, probaj fallback iz keša
+        if odds:
+            write_json("odds.json", odds, day=d)
+            results_summary["odds_days"].append(
+                {"date": ds, "count": len(odds), "source": "api"}
+            )
+            logger.info("[INGEST] Odds loaded for %s from API: count=%s", ds, len(odds))
+        else:
+            cached_odds = read_json("odds.json", day=d)
+            if isinstance(cached_odds, list) and cached_odds:
+                odds = cached_odds
+                results_summary["odds_days"].append(
+                    {"date": ds, "count": len(odds), "source": "cache"}
+                )
+                logger.warning(
+                    "[INGEST] API returned 0 odds for %s, reusing cache (count=%s)",
+                    ds,
+                    len(odds),
+                )
+            else:
+                write_json("odds.json", [], day=d)
+                results_summary["odds_days"].append(
+                    {"date": ds, "count": 0, "source": "empty"}
+                )
+                logger.warning(
+                    "[INGEST] API returned 0 odds and no cache exists for %s; writing empty.",
+                    ds,
+                )
+
+    # Ako iz nekog razloga danas nema fixtures, probaj fallback iz keša (ne prazan)
     if not fixtures_today:
         cached_fixtures = read_json("fixtures.json", day=today)
-        if isinstance(cached_fixtures, list):
+        if isinstance(cached_fixtures, list) and cached_fixtures:
             fixtures_today = cached_fixtures
-            logger.warning("[INGEST] No fresh fixtures for today, using cached fixtures for %s", today_str)
+            logger.warning(
+                "[INGEST] No fresh fixtures for today, using cached fixtures for %s",
+                today_str,
+            )
+        else:
+            logger.error(
+                "[INGEST] No fixtures for today %s (ni API ni cache). fixtures_today is empty.",
+                today_str,
+            )
 
     # 2) STANDINGS za sve DEFAULT_LEAGUES
     for league_id in DEFAULT_LEAGUES:
