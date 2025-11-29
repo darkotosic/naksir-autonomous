@@ -329,79 +329,65 @@ def _build_legs_for_builders(
     family_cap: int = 220,
 ) -> List[Dict[str, Any]]:
     """
-    Poziva listu buildera i vraća deduplikovan pool legs.
+    Pokreće jedan "builder group" (npr. ["O25"], ["BTTS_YES"], ["HOME"],
+    ili miks više marketa) i vraća objedinjeni pool nogu (legs) za zadati set.
 
-    Po builderu:
-      - cap na max_legs_per_builder
-      - deduplikacija po (fixture_id, market)
-    Na kraju:
-      - globalni sort po EU priority + kickoff + score
-      - preferira top evropske lige pre ostalih.
+    - family_cap obezbeđuje da jedna market-family (GOALS, BTTS, DC, ...)
+      ne dominira kompletan pool – kasnije dobijamo miksovanije tikete.
+    - Ako je grupa *čisto* BTTS (samo ["BTTS_YES"] ili samo ["BTTS_NO"]),
+      primenjuje se advance_btts.apply_advanced_btts_filters da bi se BTTS
+      kandidati dodatno filtrirali i rangirali.
+
+    Ostatak seta (mix, fallback, itd.) ostaje netaknut – engine logika se ne menja.
     """
+    # Lokalni import da izbegnemo potencijalne cikluse pri importovanju
+    try:
+        from .advance_btts import apply_advanced_btts_filters
+    except ImportError:
+        apply_advanced_btts_filters = None  # ako modul ne postoji, samo preskačemo advanced deo
+
+    print(f"[DBG] === Builder group start: {builder_codes!r} ===")
+
     pool: List[Dict[str, Any]] = []
-    seen: Set[Tuple[int, str]] = set()
     family_counts: Dict[str, int] = {}
 
-    print(f"[DBG] === Builder group start: {builder_codes} ===")
-
     for code in builder_codes:
-        builder = get_builder(code)
-        if builder is None:
-            print(f"[WARN] Builder not found: {code}")
+        builder_fn = get_builder(code)
+        if builder_fn is None:
+            print(f"[WARN] Builder '{code}' nije registrovan u registry-ju – preskačem.")
             continue
 
+        # Podržava i nove buildere sa max_legs i stare bez tog argumenta
         try:
-            legs = builder(fixtures=fixtures, odds=odds, max_legs=max_legs_per_builder)
+            builder_legs = builder_fn(
+                fixtures,
+                odds,
+                max_legs=max_legs_per_builder,
+            )
         except TypeError:
-            legs = builder(fixtures=fixtures, odds=odds)  # type: ignore[call-arg]
-        except Exception as exc:
-            print(f"[ERR] Builder {code} raised exception: {exc}")
-            continue
+            builder_legs = builder_fn(fixtures, odds)
 
-        if not legs:
-            print(f"[DBG] Builder {code} → returned 0 legs")
-            continue
+        print(f"[DBG] Builder {code} → vratio {len(builder_legs)} legs")
 
-        print(f"[DBG] Builder {code} → raw legs: {len(legs)}")
-
-        for leg in legs[:max_legs_per_builder]:
-            try:
-                fid = int(leg["fixture_id"])
-                market = str(leg.get("market") or "")
-            except Exception:
+        for leg in builder_legs:
+            family = str(leg.get("family") or leg.get("market") or code)
+            current = family_counts.get(family, 0)
+            if current >= family_cap:
                 continue
-
-            fam = str(leg.get("market_family") or market or "")
-            if fam:
-                current = family_counts.get(fam, 0)
-                if current >= family_cap:
-                    continue
-                family_counts[fam] = current + 1
-
-            key = (fid, market)
-            if key in seen:
-                continue
-
-            seen.add(key)
+            family_counts[family] = current + 1
             pool.append(leg)
 
-    if not pool:
-        print("[DBG] === Builder group done → pool size: 0 ===")
-        return []
+    # Advanced BTTS obrada – samo za čiste BTTS grupe
+    if apply_advanced_btts_filters is not None and len(builder_codes) == 1 and builder_codes[0] in {
+        "BTTS_YES",
+        "BTTS_NO",
+    }:
+        mode = "YES" if builder_codes[0] == "BTTS_YES" else "NO"
+        print(f"[ADV_BTTS] Primena advance_btts za BTTS_{mode} na {len(pool)} kandidata.")
+        pool = apply_advanced_btts_filters(pool, mode=mode)
+        print(f"[ADV_BTTS] Nakon advance_btts ostaje {len(pool)} legs.")
 
-    # Globalni sort: prvo EU priority, pa leg score, pa kickoff.
-    def _pool_key(leg: Dict[str, Any]) -> Tuple[int, float, str]:
-        prio = league_priority_from_leg(leg)
-        score = _get_leg_score(leg)
-        kickoff = str(leg.get("kickoff") or "")
-        return (prio, score, kickoff)
-
-    pool.sort(key=_pool_key, reverse=True)
-
-    print(
-        f"[DBG] === Builder group done → pool size: {len(pool)} "
-        f"(sorted by EU priority, family caps={family_counts}) ==="
-    )
+    print(f"[DBG] === Builder group done → pool size: {len(pool)} ===")
     return pool
 
 
