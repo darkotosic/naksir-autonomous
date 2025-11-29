@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from core_data.cleaners import _map_market
+
 # Zadržavamo listu preferiranih liga radi kasnijeg ponderisanja ili specijalnih pravila,
 # ali je VIŠE NE KORISTIMO kao hard filter u is_fixture_playable (global pool).
 ALLOW_LIST: List[int] = [
@@ -88,28 +90,29 @@ def get_market_odds(
     value_label: str,
 ) -> Optional[float]:
     """
-    Pronalazi kvotu za zadati market:
+    Pronalazi kvotu za zadati market.
 
-    - bet_name npr. "Goals Over/Under"
-    - value_label npr. "Over 2.5"
+    Prvo pokušava strogo (bet_name + label) match kao do sada.
+    Ako ne nađe ništa, radi fallback preko canonical 'market' koda
+    (HOME, O15, BTTS_YES, DC_1X...) koji puni clean_odds/_map_market.
 
-    Poboljšanja:
-    - case-insensitive i trim сравнение (manje pucanja na "goals over/under", "Over 2.5 ")
-    - vraća NAJNIŽU kvotu (konzervativno) među bookmakerima ili None.
+    Vraća NAJNIŽU kvotu (konzervativno) ili None.
     """
     rows = odds_index.get(fixture_id) or []
+    if not rows:
+        return None
+
     found: List[float] = []
 
     bet_name_key = (bet_name or "").strip().lower()
     label_key = (value_label or "").strip().lower()
 
+    # 1) Klasičan bet_name + label match (unapređena verzija)
     for r in rows:
         r_bet = (r.get("bet_name") or "").strip().lower()
         r_label = (r.get("label") or "").strip().lower()
 
-        if r_bet != bet_name_key:
-            continue
-        if r_label != label_key:
+        if r_bet != bet_name_key or r_label != label_key:
             continue
 
         odd_val = r.get("odd")
@@ -119,9 +122,37 @@ def get_market_odds(
         except (TypeError, ValueError):
             continue
 
-    if not found:
+    if found:
+        return min(found)
+
+    # 2) Fallback: koristi canonical market kod
+    try:
+        market_code = _map_market(bet_name, value_label)
+    except Exception:
+        market_code = None
+
+    if not market_code:
         return None
-    return min(found)
+
+    market_key = str(market_code).strip().upper()
+    found2: List[float] = []
+
+    for r in rows:
+        r_code = str(r.get("market") or "").strip().upper()
+        if r_code != market_key:
+            continue
+
+        odd_val = r.get("odd")
+        try:
+            if odd_val is not None:
+                found2.append(float(odd_val))
+        except (TypeError, ValueError):
+            continue
+
+    if not found2:
+        return None
+
+    return min(found2)
 
 
 def get_market_odds_by_code(
