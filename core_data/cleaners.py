@@ -1,8 +1,10 @@
 # core_data/cleaners.py
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, List, Optional
 
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Helper: standardize access to raw["response"]
@@ -11,19 +13,39 @@ from typing import Any, Dict, List, Optional
 def _safe_response(raw: Any) -> List[Dict[str, Any]]:
     """
     API-FOOTBALL vraća strukturu:
-    { "get": "...", "response": [ ... ] }
+      { "get": "...", "response": [ ... ], "errors": [...], "results": int }
 
-    Ovaj helper vraća uvek listu dict-ova.
+    Ovaj helper vraća uvek listu dict-ova i LOGUJE ako postoje errors.
     """
     if raw is None:
         return []
+
+    # Klasičan API-FOOTBALL JSON
     if isinstance(raw, dict):
+        errors = raw.get("errors") or []
+        if errors:
+            # želimo da se vidi u GitHub Actions logu
+            logger.error("API-Football errors: %s", errors)
+
         resp = raw.get("response")
         if isinstance(resp, list):
-            return resp
+            # filtriramo samo dict-ove
+            return [x for x in resp if isinstance(x, dict)]
+
+        # Ako nema response liste, ali results > 0, loguj anomaliju
+        results = raw.get("results")
+        if results not in (None, 0):
+            logger.warning(
+                "API-Football raw has results=%s but no usable response list. Raw snippet=%r",
+                results,
+                {k: raw.get(k) for k in ("get", "parameters", "errors", "results")},
+            )
         return []
+
+    # Već dobijena lista
     if isinstance(raw, list):
-        return raw
+        return [x for x in raw if isinstance(x, dict)]
+
     return []
 
 
