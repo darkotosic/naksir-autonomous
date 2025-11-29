@@ -160,12 +160,6 @@ def get_api_status() -> Dict[str, Any]:
     path = "status"
     resp = _request(path, params={})
 
-    # pokušaćemo da pokupimo rate-limit iz raw headera – ali ovde ih nemamo jer
-    # requests objekt je već "nestao". Ako želiš 100% header pristup,
-    # možeš da napraviš poseban low-level wrapper koji vraća i response.
-    # Ovde rešavamo preko drugog GET-a bez retry-a i iz response headers.
-    # (pošto je health-check 1x dnevno, nije problem)
-
     # Napravi direktan poziv bez abstract wrappera, samo za header info:
     status_url = f"{API_BASE.rstrip('/')}/{path}"
     headers = {
@@ -201,13 +195,25 @@ def fetch_fixtures_by_date(target_date: str) -> Dict[str, Any]:
     """
     /fixtures?date=YYYY-MM-DD&timezone=TZ
     """
-    return _request(
-        "fixtures",
-        params={
-            "date": target_date,
-            "timezone": TIMEZONE,
-        },
-    )
+    params = {
+        "date": target_date,
+        "timezone": TIMEZONE,
+    }
+    resp = _request("fixtures", params=params)
+    try:
+        results = resp.get("results")
+        resp_len = len(resp.get("response") or [])
+        errors = resp.get("errors")
+        logger.info(
+            "[API-DEBUG] fixtures date=%s results=%s response_len=%s errors=%s",
+            target_date,
+            results,
+            resp_len,
+            errors,
+        )
+    except Exception:
+        logger.warning("[API-DEBUG] fixtures raw for %s: %r", target_date, resp)
+    return resp
 
 
 # ---------------------------------------------------------------------
@@ -220,13 +226,25 @@ def fetch_odds_by_date(target_date: str) -> Dict[str, Any]:
     Napomena: API-FOOTBALL ima više varijacija (odds/live, odds/between, itd),
     ovde koristimo osnovni daily snapshot.
     """
-    return _request(
-        "odds",
-        params={
-            "date": target_date,
-            "timezone": TIMEZONE,
-        },
-    )
+    params = {
+        "date": target_date,
+        "timezone": TIMEZONE,
+    }
+    resp = _request("odds", params=params)
+    try:
+        results = resp.get("results")
+        resp_len = len(resp.get("response") or [])
+        errors = resp.get("errors")
+        logger.info(
+            "[API-DEBUG] odds date=%s results=%s response_len=%s errors=%s",
+            target_date,
+            results,
+            resp_len,
+            errors,
+        )
+    except Exception:
+        logger.warning("[API-DEBUG] odds raw for %s: %r", target_date, resp)
+    return resp
 
 
 # ---------------------------------------------------------------------
