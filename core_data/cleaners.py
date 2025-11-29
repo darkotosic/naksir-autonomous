@@ -1,4 +1,3 @@
-# core_data/cleaners.py
 from __future__ import annotations
 
 import logging
@@ -243,9 +242,6 @@ def clean_odds(raw: Any) -> List[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 def clean_standings(raw: Any) -> List[Dict[str, Any]]:
-    """
-    Vraća raw response listu; dodatno čišćenje radiš po potrebi.
-    """
     return _safe_response(raw)
 
 
