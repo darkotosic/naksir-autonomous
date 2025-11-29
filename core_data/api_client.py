@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 
 API_KEY = os.getenv("API_FOOTBALL_KEY", "")
-API_BASE = os.getenv("API_FOOTBALL_BASE_URL", "https://v3.football.api-sports.io")
+API_BASE = "https://v3.football.api-sports.io"
 TIMEZONE = os.getenv("API_FOOTBALL_TIMEZONE", "Europe/Belgrade")
 
 # Minimalna pauza između poziva da ne čekićamo API (u sekundama)
@@ -39,7 +39,6 @@ def _respect_qps_limit() -> None:
     """
     Vrlo jednostavan limiter:
     - obezbedi da je bar MIN_REQUEST_INTERVAL prošlo između 2 poziva.
-    Za enterprise kasnije možeš staviti ozbiljniji token bucket.
     """
     global _last_request_ts
     now = time.time()
@@ -60,11 +59,6 @@ def _request(
 ) -> Dict[str, Any]:
     """
     Centralni HTTP wrapper za sve pozive API-FOOTBALL-a.
-
-    - Dodaje API ključ u header.
-    - Radi jednostavan QPS limit.
-    - Ima retry sa eksponencijalnim backoff-om.
-    - Ako posle retry-a i dalje nije OK, baca RuntimeError sa kontekstom.
     """
     _ensure_api_key()
     if params is None:
@@ -84,7 +78,6 @@ def _request(
             _respect_qps_limit()
             resp = requests.request(method, url, headers=headers, params=params, timeout=timeout)
 
-            # Log basic info
             logger.debug(
                 "API-Football request: %s %s params=%s status=%s",
                 method,
@@ -93,7 +86,6 @@ def _request(
                 resp.status_code,
             )
 
-            # Rate-limit situacije i server greške
             if resp.status_code in (429, 500, 502, 503, 504):
                 logger.warning(
                     "API-Football transient error (status=%s), attempt=%s/%s",
@@ -101,14 +93,12 @@ def _request(
                     attempt,
                     max_retries,
                 )
-                # čitamo malo body zbog debug-a
                 try:
                     data = resp.json()
                 except Exception:
                     data = {"raw": resp.text[:300]}
                 last_exc = RuntimeError(f"Transient API error: {resp.status_code}, body={data}")
             elif resp.status_code != 200:
-                # Ne retry-amo ostale 4xx osim 429
                 try:
                     data = resp.json()
                 except Exception:
@@ -117,11 +107,9 @@ def _request(
                     f"API error: status={resp.status_code}, url={url}, params={params}, body={data}"
                 )
             else:
-                # 200 OK
                 try:
                     return resp.json()
                 except ValueError as e:
-                    # JSON decode problem – retry ima smisla
                     logger.warning("JSON decode error on attempt %s: %s", attempt, e)
                     last_exc = e
 
@@ -134,12 +122,10 @@ def _request(
             )
             last_exc = e
 
-        # ako nismo vratili response, spremamo backoff i novi pokušaj
         if attempt < max_retries:
             backoff = RETRY_BACKOFF_BASE * (2 ** (attempt - 1))
             time.sleep(backoff)
 
-    # Ako smo iscrpeli retry-e
     raise RuntimeError(f"API-Football request failed after {max_retries} attempts: {last_exc}")
 
 
@@ -150,17 +136,10 @@ def _request(
 def get_api_status() -> Dict[str, Any]:
     """
     Wrapper za /status
-    Vraća dict:
-    {
-      "ok": bool,
-      "raw": ...,
-      "rate_limit": { ... }
-    }
     """
     path = "status"
     resp = _request(path, params={})
 
-    # Napravi direktan poziv bez abstract wrappera, samo za header info:
     status_url = f"{API_BASE.rstrip('/')}/{path}"
     headers = {
         "x-apisports-key": API_KEY,
@@ -223,8 +202,6 @@ def fetch_fixtures_by_date(target_date: str) -> Dict[str, Any]:
 def fetch_odds_by_date(target_date: str) -> Dict[str, Any]:
     """
     /odds?date=YYYY-MM-DD&timezone=TZ
-    Napomena: API-FOOTBALL ima više varijacija (odds/live, odds/between, itd),
-    ovde koristimo osnovni daily snapshot.
     """
     params = {
         "date": target_date,
@@ -291,4 +268,4 @@ def fetch_h2h(home_id: int, away_id: int, last: int = 5) -> Dict[str, Any]:
             "h2h": h2h_str,
             "last": last,
         },
-    )
+                )
